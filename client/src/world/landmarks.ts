@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { PLAYER_COLORS } from '@shared/constants';
 import type { IslandTerrainData, Landmark } from '@shared/terrain';
+import type { SpatialCollisionGrid } from '@shared/spatialGrid';
 
 export interface WardrobePoint {
   id: string;
@@ -16,7 +17,10 @@ export class LandmarksSystem {
   private readonly torchLights: { light: THREE.PointLight; baseIntensity: number; phase: number }[] = [];
   private readonly waterfalls: THREE.Mesh[] = [];
 
-  constructor(private readonly terrain: IslandTerrainData) {
+  constructor(
+    private readonly terrain: IslandTerrainData,
+    private readonly spatialGrid?: SpatialCollisionGrid
+  ) {
     this.buildAll();
   }
 
@@ -325,6 +329,18 @@ export class LandmarksSystem {
     this.torchLights.push({ light: fireLight, baseIntensity: 2.8, phase: lm.z * 0.1 });
 
     this.addWardrobeChest(g, 0, 0, -3.2, `wardrobe_${lm.id}`, `${lm.name} Chest`, new THREE.Vector3(lm.x, lm.y, lm.z - 3.2));
+
+    // Barrels & supply crates around camp
+    const barrelMat = this.makeWoodMat(0x5a3a1e);
+    const b1 = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.38, 0.85, 8), barrelMat);
+    b1.position.set(2.4, 0.42, -1.2);
+    b1.castShadow = true;
+    const c1 = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.7, 0.8), this.makeWoodMat(0x7c5432));
+    c1.position.set(-1.6, 0.35, 2.2);
+    c1.castShadow = true;
+    g.add(b1, c1);
+    this.spatialGrid?.insert(lm.x - 2.5, lm.z - 1.5, 1.8);
+
     this.group.add(g);
   }
 

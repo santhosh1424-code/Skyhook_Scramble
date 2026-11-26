@@ -17,7 +17,8 @@ export const MOVE_SPEEDS = {
 
 export type GameMode = 'competitive' | 'coop' | 'explore';
 export type TeamMode = 'solo' | 'teams';
-export type QualityPreset = 'low' | 'medium' | 'high' | 'ultra';
+export type QualityPreset = 'auto' | 'low' | 'medium' | 'high' | 'ultra';
+export type ConcreteQuality = 'low' | 'medium' | 'high' | 'ultra';
 
 export interface QualityConfig {
   resolutionScale: number;
@@ -25,37 +26,45 @@ export interface QualityConfig {
   shadowMapSize: number;
   drawDistance: number;
   vegDensity: number; // 0.25 .. 1.0
-  postProcess: boolean;
+  postProcess: boolean; // Only High & Ultra
   ssao: boolean;
+  wetnessShader: boolean; // Disabled on Low
+  footIK: boolean; // Desktop-only (disabled on Low/Mobile)
 }
 
-export const QUALITY_PRESETS: Record<QualityPreset, QualityConfig> = {
+export const QUALITY_PRESETS: Record<ConcreteQuality, QualityConfig> = {
   low: {
     resolutionScale: 0.75,
     shadows: false,
     shadowMapSize: 512,
-    drawDistance: 420,
+    drawDistance: 440,
     vegDensity: 0.3,
     postProcess: false,
-    ssao: false
+    ssao: false,
+    wetnessShader: false,
+    footIK: false
   },
   medium: {
     resolutionScale: 1.0,
     shadows: true,
     shadowMapSize: 1024,
-    drawDistance: 680,
+    drawDistance: 700,
     vegDensity: 0.6,
-    postProcess: true,
-    ssao: false
+    postProcess: false,
+    ssao: false,
+    wetnessShader: true,
+    footIK: true
   },
   high: {
     resolutionScale: 1.25,
     shadows: true,
     shadowMapSize: 2048,
-    drawDistance: 950,
+    drawDistance: 980,
     vegDensity: 0.85,
     postProcess: true,
-    ssao: false
+    ssao: false,
+    wetnessShader: true,
+    footIK: true
   },
   ultra: {
     resolutionScale: 1.5,
@@ -64,7 +73,9 @@ export const QUALITY_PRESETS: Record<QualityPreset, QualityConfig> = {
     drawDistance: 1300,
     vegDensity: 1.0,
     postProcess: true,
-    ssao: true
+    ssao: true,
+    wetnessShader: true,
+    footIK: true
   }
 };
 

@@ -1,0 +1,10 @@
+{
+  "name": "Treasure Island",
+  "short_name": "Treasure Island",
+  "start_url": "/",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#0b2239",
+  "theme_color": "#0b2239",
+  "icons": []
+}

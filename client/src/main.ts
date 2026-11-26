@@ -8,12 +8,14 @@ import {
   SKIN_TONES,
   TEAMS,
   type ClothingLoadout,
+  type ConcreteQuality,
   type GameMode,
   type QualityPreset,
   type TeamMode
 } from '@shared/constants';
 import { CLOTHING_CATALOG, validateLoadout } from '@shared/catalog';
-import { IslandTerrainData } from '@shared/terrain';
+import { IslandTerrainData, type Landmark } from '@shared/terrain';
+import { SpatialCollisionGrid } from '@shared/spatialGrid';
 import { generateTreasureHunt, type ClueNode, type TreasureHuntPlan } from '@shared/treasure';
 import { loadCharacterAssets } from './assets/assetLoader';
 import { ChunkedTerrain } from './world/terrainMesh';
@@ -101,7 +103,8 @@ const bannerDescEl = document.getElementById('banner-desc')!;
 const chatLogEl = document.getElementById('chat-log')!;
 const chatInputEl = document.getElementById('chat-input') as HTMLInputElement;
 const hudChatWrapEl = document.getElementById('hud-chat-wrap')!;
-const rotatePromptEl = document.getElementById('rotate-prompt')!;
+const rotateOverlayEl = document.getElementById('rotate-overlay')!;
+const fpsCounterEl = document.getElementById('fps-counter')!;
 const subtitleBoxEl = document.getElementById('subtitle-box')!;
 
 // --- WEBGL CHECK & RENDERER ---
@@ -135,17 +138,21 @@ let waterSky!: WaterAndSkySystem;
 let vegSys: VegetationSystem | null = null;
 let landmarksSys: LandmarksSystem | null = null;
 let wildlifeSys: WildlifeSystem | null = null;
+let spatialGrid: SpatialCollisionGrid | null = null;
 let treasureObj: TreasureWorldObjects | null = null;
 let mapRenderer: IslandMapRenderer | null = null;
 let huntPlan: TreasureHuntPlan | null = null;
 
 let activeLoadout: ClothingLoadout = loadSavedLoadout();
 let keybinds: Record<string, string> = loadKeybinds();
-let qualityPreset: QualityPreset = detectDefaultQuality();
+let qualityPreset: QualityPreset = 'auto';
+let resolvedQuality: ConcreteQuality = detectAutoQuality();
+let dynamicResScale = 1.0;
+let showFpsCounter = false;
 let camSensitivity = 1.0;
 let colorblindMode = false;
 let reducedMotion = false;
-let rotateDismissed = false;
+let worldBuiltSeed: number | null = null;
 
 let matchActive = false;
 let isOnlineMatch = false;
@@ -161,8 +168,15 @@ let discoveredClues: ClueNode[] = [];
 let camYaw = 0;
 let camPitch = 0.28;
 let elapsed = 0;
+let physAccum = 0;
 let stepAccum = 0;
 let netSendAccum = 0;
+let avgFrameMs = 16.6;
+let lowPerfFrames = 0;
+let highPerfFrames = 0;
+let fpsSampleFrames = 0;
+let fpsSampleClock = 0;
+let currentFps = 60;
 let rebindingKey: string | null = null;
 
 const keysDown = new Set<string>();
@@ -173,16 +187,27 @@ let shoveQueued = false;
 const emoteNames = ['emote_wave', 'emote_cheer', 'emote_dance', 'emote_bow'] as const;
 let emoteIdx = 0;
 
-function detectDefaultQuality(): QualityPreset {
+function detectAutoQuality(): ConcreteQuality {
   const isTouch = detectTouchDevice();
   const mem = (navigator as unknown as { deviceMemory?: number }).deviceMemory;
-  if (isTouch || (typeof mem === 'number' && mem <= 4)) return 'low';
+  const cores = navigator.hardwareConcurrency || 4;
+  let gpuRenderer = '';
+  try {
+    const gl = renderer.getContext();
+    const dbg = gl.getExtension('WEBGL_debug_renderer_info');
+    if (dbg) gpuRenderer = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '');
+  } catch {}
+  const lowGpu = /swiftshader|llvmpipe|mali-4|adreno \(tm\) 5/i.test(gpuRenderer);
+  if (isTouch || lowGpu || (typeof mem === 'number' && mem <= 4) || cores <= 4) return 'low';
+  if (!isTouch && typeof mem === 'number' && mem >= 8 && cores >= 8 && /nvidia|radeon|rtx|rx |apple m/i.test(gpuRenderer)) {
+    return 'high';
+  }
   return 'medium';
 }
 
 function loadSavedLoadout(): ClothingLoadout {
   try {
-    const raw = JSON.parse(localStorage.getItem('treasure_isle_loadout') || 'null');
+    const raw = JSON.parse(localStorage.getItem('treasure_island_loadout') || 'null');
     return validateLoadout(raw);
   } catch {
     return structuredClone(DEFAULT_LOADOUT);
@@ -190,12 +215,12 @@ function loadSavedLoadout(): ClothingLoadout {
 }
 
 function saveLoadout(): void {
-  localStorage.setItem('treasure_isle_loadout', JSON.stringify(activeLoadout));
+  localStorage.setItem('treasure_island_loadout', JSON.stringify(activeLoadout));
 }
 
 function loadKeybinds(): Record<string, string> {
   try {
-    const raw = JSON.parse(localStorage.getItem('treasure_isle_keys') || 'null');
+    const raw = JSON.parse(localStorage.getItem('treasure_island_keys') || 'null');
     return raw ? { ...DEFAULT_KEYS, ...raw } : { ...DEFAULT_KEYS };
   } catch {
     return { ...DEFAULT_KEYS };
@@ -204,8 +229,9 @@ function loadKeybinds(): Record<string, string> {
 
 function applyQualityPreset(preset: QualityPreset): void {
   qualityPreset = preset;
-  const q = QUALITY_PRESETS[preset];
-  const pr = Math.min(window.devicePixelRatio || 1, q.resolutionScale);
+  resolvedQuality = preset === 'auto' ? detectAutoQuality() : preset;
+  const q = QUALITY_PRESETS[resolvedQuality];
+  const pr = Math.min(window.devicePixelRatio || 1, q.resolutionScale * dynamicResScale);
   renderer.setPixelRatio(pr);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = q.shadows;
@@ -219,27 +245,81 @@ function applyQualityPreset(preset: QualityPreset): void {
     }
   }
   vegSys?.setDensity(q.vegDensity);
+  actors.forEach((a) => {
+    a.char.wetnessEnabled = q.wetnessShader;
+  });
   postFx.configure(q, window.innerWidth, window.innerHeight);
 }
 
+function generateTerrainAsync(seed: number): Promise<IslandTerrainData> {
+  return new Promise((resolve) => {
+    let settled = false;
+    try {
+      const worker = new Worker(new URL('./workers/terrainWorker.ts', import.meta.url), { type: 'module' });
+      worker.onmessage = (
+        ev: MessageEvent<{
+          seed: number;
+          heightGrid: Float32Array;
+          riverGrid: Float32Array;
+          landmarks: Landmark[];
+          volcanoCenter: { x: number; z: number };
+          lagoonCenter: { x: number; z: number };
+          swampCenter: { x: number; z: number };
+        }>
+      ) => {
+        if (settled) return;
+        settled = true;
+        worker.terminate();
+        resolve(new IslandTerrainData(ev.data.seed, ev.data));
+      };
+      worker.onerror = () => {
+        if (settled) return;
+        settled = true;
+        worker.terminate();
+        resolve(new IslandTerrainData(seed));
+      };
+      worker.postMessage({ seed });
+    } catch {
+      resolve(new IslandTerrainData(seed));
+    }
+  });
+}
+
 // --- BUILD WORLD FROM SEED ---
-function buildIslandWorld(seed: number, forMenuOnly = false): void {
+async function buildIslandWorld(seed: number, forMenuOnly = false): Promise<void> {
+  const normalizedSeed = (seed >>> 0) || 424242;
+  if (worldBuiltSeed === normalizedSeed && terrainData && terrainMesh && landmarksSys && vegSys && wildlifeSys) {
+    if (!forMenuOnly) {
+      if (treasureObj) scene.remove(treasureObj.group);
+      huntPlan = generateTreasureHunt(terrainData);
+      treasureObj = new TreasureWorldObjects(huntPlan, terrainData);
+      scene.add(treasureObj.group);
+      mapRenderer = new IslandMapRenderer(terrainData);
+    }
+    return;
+  }
+
   if (terrainMesh) { scene.remove(terrainMesh.group); terrainMesh.dispose(); terrainMesh = null; }
   if (vegSys) { scene.remove(vegSys.group); vegSys = null; }
   if (landmarksSys) { scene.remove(landmarksSys.group); landmarksSys = null; }
   if (wildlifeSys) { scene.remove(wildlifeSys.group); wildlifeSys = null; }
   if (treasureObj) { scene.remove(treasureObj.group); treasureObj = null; }
 
-  terrainData = new IslandTerrainData(seed);
-  terrainMesh = new ChunkedTerrain(terrainData);
+  terrainData = await generateTerrainAsync(normalizedSeed);
+  worldBuiltSeed = normalizedSeed;
+  spatialGrid = new SpatialCollisionGrid();
+
+  const berth0 = terrainData.landmarks.find((l) => l.kind === 'ship_berth');
+  terrainMesh = new ChunkedTerrain(terrainData, berth0?.x || 0, berth0?.z || 0);
   scene.add(terrainMesh.group);
 
-  vegSys = new VegetationSystem(terrainData);
-  vegSys.setDensity(QUALITY_PRESETS[qualityPreset].vegDensity);
+  vegSys = new VegetationSystem(terrainData, spatialGrid);
+  vegSys.setDensity(QUALITY_PRESETS[resolvedQuality].vegDensity);
   scene.add(vegSys.group);
 
-  landmarksSys = new LandmarksSystem(terrainData);
+  landmarksSys = new LandmarksSystem(terrainData, spatialGrid);
   scene.add(landmarksSys.group);
+  waterSky?.setShipWakePositions(landmarksSys.shipBerths.map((b) => b.pos));
 
   wildlifeSys = new WildlifeSystem(terrainData);
   scene.add(wildlifeSys.group);
@@ -401,8 +481,9 @@ function clearActors(): void {
   localActor = null;
 }
 
-function startOfflineMatch(): void {
+async function startOfflineMatch(): Promise<void> {
   audio.ensureStarted();
+  if (mobileControls.enabled) void mobileControls.requestLandscapeFullscreen();
   clearActors();
   isOnlineMatch = false;
 
@@ -414,11 +495,12 @@ function startOfflineMatch(): void {
   timeLeft = gameMode === 'explore' ? 0 : parseInt((document.getElementById('time-limit') as HTMLSelectElement).value, 10);
   const fillBots = (document.getElementById('bot-fill') as HTMLSelectElement).value === 'yes';
 
-  buildIslandWorld(seed, false);
+  await buildIslandWorld(seed, false);
 
   const count = fillBots ? 9 : 1;
   const botNames = ['Barnacle [BOT]', 'Cutlass Kate [BOT]', 'Salty Sam [BOT]', 'Calico [BOT]', 'Reef Jack [BOT]', 'Vane [BOT]', 'Morgan [BOT]', 'Sparrow [BOT]'];
   const berths = landmarksSys!.shipBerths;
+  const wetOn = QUALITY_PRESETS[resolvedQuality].wetnessShader;
 
   for (let i = 0; i < count; i++) {
     const isHuman = i === 0;
@@ -431,9 +513,11 @@ function startOfflineMatch(): void {
     });
 
     const char = new HumanoidCharacter(baseGltf, clothingGltf, isHuman ? activeLoadout : botLoadout);
+    char.wetnessEnabled = wetOn;
     const ctrl = new PlayerPhysicsController();
     const berth = berths[i % berths.length];
     ctrl.pos.copy(berth.pos).add(new THREE.Vector3(0, 1.0, -3));
+    ctrl.prevPos.copy(ctrl.pos);
     char.root.position.copy(ctrl.pos);
     scene.add(char.root);
 
@@ -465,8 +549,9 @@ function startOfflineMatch(): void {
   addChatMessage('SYSTEM', `Landfall on Seed #${seed}! Follow your compass to Clue 1.`);
 }
 
-function startOnlineMatch(msg: any): void {
+async function startOnlineMatch(msg: any): Promise<void> {
   audio.ensureStarted();
+  if (mobileControls.enabled) void mobileControls.requestLandscapeFullscreen();
   clearActors();
   isOnlineMatch = true;
 
@@ -475,14 +560,17 @@ function startOnlineMatch(msg: any): void {
   teamMode = room.settings.teamMode;
   timeLeft = gameMode === 'explore' ? 0 : room.settings.timeLimit;
 
-  buildIslandWorld(msg.seed, false);
+  await buildIslandWorld(msg.seed, false);
   const berths = landmarksSys!.shipBerths;
+  const wetOn = QUALITY_PRESETS[resolvedQuality].wetnessShader;
 
   room.players.forEach((rp: any, idx: number) => {
     const char = new HumanoidCharacter(baseGltf, clothingGltf, validateLoadout(rp.loadout));
+    char.wetnessEnabled = wetOn;
     const ctrl = new PlayerPhysicsController();
     const berth = berths[(rp.berthIndex ?? idx) % berths.length];
     ctrl.pos.copy(berth.pos).add(new THREE.Vector3(0, 1.0, -3));
+    ctrl.prevPos.copy(ctrl.pos);
     char.root.position.copy(ctrl.pos);
     scene.add(char.root);
 
@@ -513,7 +601,6 @@ function startOnlineMatch(msg: any): void {
 
 function beginPlayHUD(): void {
   matchActive = true;
-  rotateDismissed = false;
   lobbyScreen.classList.add('hidden');
   resultsScreen.classList.add('hidden');
   hud.classList.remove('hidden');
@@ -524,7 +611,11 @@ function beginPlayHUD(): void {
   syncPlayingLockState();
   updateClueUI();
   updateScoreboardUI();
-  updateRotatePrompt();
+  updateRotateOverlay();
+}
+
+function isPortraitBlocked(): boolean {
+  return mobileControls.enabled && window.innerHeight > window.innerWidth;
 }
 
 function syncPlayingLockState(): void {
@@ -533,14 +624,15 @@ function syncPlayingLockState(): void {
     !wardrobeModal.classList.contains('hidden') ||
     !tutorialModal.classList.contains('hidden') ||
     !settingsModal.classList.contains('hidden');
-  const active = matchActive && !modalOpen;
+  const active = matchActive && !modalOpen && !isPortraitBlocked();
   document.body.classList.toggle('playing-active', active);
   mobileControls.setActive(active);
 }
 
-function updateRotatePrompt(): void {
-  const show = mobileControls.enabled && matchActive && !rotateDismissed && window.innerHeight > window.innerWidth;
-  rotatePromptEl.classList.toggle('hidden', !show);
+function updateRotateOverlay(): void {
+  const blocked = isPortraitBlocked();
+  rotateOverlayEl.classList.toggle('hidden', !blocked);
+  syncPlayingLockState();
 }
 
 function updateClueUI(): void {
@@ -729,6 +821,15 @@ function handleAttack(kind: 'slash' | 'shove'): void {
         a.controller.hitStunTimer = 0.45;
         a.char.anim.playOneShot('hit', 0.08);
       }
+      // Offline clue stealing if rival is further ahead in the riddle chain
+      if (a.botBrain && a.botBrain.clueStage > localClueStage && huntPlan) {
+        localClueStage = a.botBrain.clueStage;
+        activeClue = huntPlan.clues[localClueStage] || null;
+        if (activeClue && !discoveredClues.includes(activeClue)) discoveredClues.push(activeClue);
+        audio.playClueFound();
+        updateClueUI();
+        showBanner('📜', 'CLUE STOLEN!', `Snatched rival notes from ${a.name}!`, 3.4);
+      }
     }
   }));
 
@@ -794,6 +895,7 @@ const mobileControls = new MobileControls({
   onJump: () => { if (matchActive) jumpQueued = true; },
   onDig: () => { if (matchActive) interactQueued = true; },
   onAttack: () => { if (matchActive) attackQueued = true; },
+  onShove: () => { if (matchActive) shoveQueued = true; },
   onSprintToggle: () => {},
   onMap: toggleMapModal,
   onWardrobe: toggleWardrobeModal,
@@ -803,23 +905,63 @@ const mobileControls = new MobileControls({
     emoteIdx++;
   },
   onCameraDelta: (dx, dy) => {
-    if (!matchActive) return;
+    if (!matchActive || isPortraitBlocked()) return;
     camYaw -= dx * 0.005 * camSensitivity;
     camPitch = THREE.MathUtils.clamp(camPitch + dy * 0.004 * camSensitivity, -0.35, 1.1);
   }
 });
 document.body.classList.toggle('is-touch-device', mobileControls.enabled);
 
-// --- MAIN LOOP ---
+// --- MAIN FIXED-STEP + DYNAMIC SCALING LOOP ---
+const FIXED_DT = 1 / 60;
 let lastNow = performance.now();
+
+function updateDynamicPerf(frameDt: number): void {
+  const frameMs = frameDt * 1000;
+  avgFrameMs = avgFrameMs * 0.92 + frameMs * 0.08;
+  fpsSampleFrames++;
+  fpsSampleClock += frameDt;
+
+  if (fpsSampleClock >= 0.45) {
+    currentFps = Math.round(fpsSampleFrames / fpsSampleClock);
+    fpsSampleFrames = 0;
+    fpsSampleClock = 0;
+    if (showFpsCounter) {
+      fpsCounterEl.textContent = `${currentFps} FPS • ${dynamicResScale.toFixed(2)}x`;
+    }
+  }
+
+  // Adaptive resolution scaling when frame times stay heavy
+  if (avgFrameMs > 29) {
+    lowPerfFrames++;
+    highPerfFrames = 0;
+    if (lowPerfFrames > 75 && dynamicResScale > 0.65) {
+      dynamicResScale = Math.max(0.65, Number((dynamicResScale - 0.1).toFixed(2)));
+      lowPerfFrames = 0;
+      applyQualityPreset(qualityPreset);
+    }
+  } else if (avgFrameMs < 14) {
+    highPerfFrames++;
+    lowPerfFrames = 0;
+    if (highPerfFrames > 140 && dynamicResScale < 1.0) {
+      dynamicResScale = Math.min(1.0, Number((dynamicResScale + 0.05).toFixed(2)));
+      highPerfFrames = 0;
+      applyQualityPreset(qualityPreset);
+    }
+  }
+}
+
 function animate(now: number): void {
   requestAnimationFrame(animate);
-  const dt = Math.min(0.05, (now - lastNow) / 1000);
+  const rawDt = Math.max(0.001, (now - lastNow) / 1000);
+  const dt = Math.min(0.1, rawDt);
   lastNow = now;
   elapsed += dt;
 
+  updateDynamicPerf(rawDt);
+
   const focusPos = localActor ? localActor.controller.pos : new THREE.Vector3(0, 18, 0);
-  const drawDist = QUALITY_PRESETS[qualityPreset].drawDistance;
+  const drawDist = QUALITY_PRESETS[resolvedQuality].drawDistance;
 
   waterSky.update(dt, elapsed, focusPos, camera, drawDist);
   terrainMesh?.updateVisibility(camera, drawDist);
@@ -828,7 +970,16 @@ function animate(now: number): void {
   wildlifeSys?.update(elapsed);
 
   if (matchActive && localActor && terrainData && landmarksSys && treasureObj) {
-    stepGameplay(dt);
+    if (!isPortraitBlocked()) {
+      physAccum = Math.min(physAccum + dt, 0.1);
+      while (physAccum >= FIXED_DT) {
+        stepGameplayFixed(FIXED_DT);
+        physAccum -= FIXED_DT;
+      }
+    }
+    const alpha = physAccum / FIXED_DT;
+    localActor.controller.updateRenderAndCamera(alpha, dt, camera, camYaw, camPitch, terrainData, localActor.char);
+    updateFrameVisualsAndHUD(dt);
   } else {
     // Cinematic island flyover behind Lobby
     const ang = elapsed * 0.06;
@@ -842,7 +993,7 @@ function animate(now: number): void {
   postFx.render();
 }
 
-function stepGameplay(dt: number): void {
+function stepGameplayFixed(dt: number): void {
   if (!localActor || !landmarksSys || !treasureObj || !huntPlan) return;
   combat.update(dt);
 
@@ -870,6 +1021,7 @@ function stepGameplay(dt: number): void {
     if (gp.buttons[0]?.pressed) jumpQueued = true;
     if (gp.buttons[2]?.pressed) interactQueued = true;
     if (gp.buttons[1]?.pressed) attackQueued = true;
+    if (gp.buttons[3]?.pressed) shoveQueued = true;
     if (gp.buttons[4]?.pressed) gpSprint = true;
   }
 
@@ -888,12 +1040,15 @@ function stepGameplay(dt: number): void {
   if (attackQueued) handleAttack('slash');
   if (shoveQueued) handleAttack('shove');
 
+  const qCfg = QUALITY_PRESETS[resolvedQuality];
   const stepRes = localActor.controller.step(
     dt,
     { moveX, moveZ, sprint, jumpPressed: jumpQueued, camYaw },
     terrainData,
     localActor.char,
-    waterSky.weather.raining
+    waterSky.weather.raining,
+    spatialGrid || undefined,
+    qCfg.footIK
   );
 
   jumpQueued = false;
@@ -909,74 +1064,60 @@ function stepGameplay(dt: number): void {
     }
   }
 
-  // Update Audio spatial ambient mix
-  const shoreDist = Math.abs(Math.hypot(localActor.controller.pos.x, localActor.controller.pos.z) - 720);
-  audio.updateAmbientMix(shoreDist, waterSky.weather.windStrength, localActor.controller.pos.y);
-
-  // Step Bots (offline) or Remote Interpolation (online)
+  // Step Bots (offline)
   const carrierActor = actors.find((a) => a.controller.carryingChest) || null;
   for (const a of actors) {
-    if (a === localActor) continue;
-    if (isOnlineMatch) {
-      const snap = net.getInterpolatedPlayer(a.id);
-      if (snap) {
-        a.controller.pos.set(snap.pos.x, snap.pos.y, snap.pos.z);
-        a.controller.yaw = snap.yaw;
-        a.controller.carryingChest = snap.carryingChest;
-        a.controller.knockedDownTimer = snap.knockedDownTimer;
-        a.char.root.position.copy(a.controller.pos);
-        a.char.root.rotation.y = a.controller.yaw;
-        a.char.anim.setLocomotionState((snap.animState as any) || 'idle');
-        a.char.anim.update(dt, terrainData, a.controller.pos, a.controller.yaw, true);
-        if (voice.enabled) voice.updateProximityVolume(a.id, a.controller.pos.distanceTo(localActor.controller.pos));
-      }
-    } else if (a.botBrain) {
-      const bi = a.botBrain.computeInput(
-        dt,
-        a.controller.pos,
-        a.controller.carryingChest,
-        huntPlan,
-        treasureObj,
-        carrierActor ? carrierActor.controller.pos : null,
-        carrierActor ? carrierActor.teamId : null,
-        terrainData
-      );
-      a.controller.step(dt, bi.input, terrainData, a.char, waterSky.weather.raining);
+    if (a === localActor || isOnlineMatch || !a.botBrain) continue;
+    const bi = a.botBrain.computeInput(
+      dt,
+      a.controller.pos,
+      a.controller.carryingChest,
+      huntPlan,
+      treasureObj,
+      carrierActor ? carrierActor.controller.pos : null,
+      carrierActor ? carrierActor.teamId : null,
+      terrainData
+    );
+    a.controller.step(dt, bi.input, terrainData, a.char, waterSky.weather.raining, spatialGrid || undefined, false);
+    a.char.root.position.copy(a.controller.pos);
+    a.char.root.rotation.y = a.controller.yaw;
 
-      if (bi.wantsDig) {
-        if (treasureObj.chestState === 'dropped' && a.controller.pos.distanceTo(treasureObj.chestPos) < 3.5) {
+    if (bi.wantsDig) {
+      if (treasureObj.chestState === 'dropped' && a.controller.pos.distanceTo(treasureObj.chestPos) < 3.5) {
+        treasureObj.chestState = 'carried';
+        treasureObj.carrierId = a.id;
+        a.controller.carryingChest = true;
+      } else if (
+        treasureObj.chestState === 'buried' &&
+        a.controller.pos.distanceTo(new THREE.Vector3(huntPlan.treasurePos.x, huntPlan.treasurePos.y, huntPlan.treasurePos.z)) < 4.5
+      ) {
+        treasureObj.digProgress += 1;
+        if (treasureObj.digProgress >= 2) {
           treasureObj.chestState = 'carried';
           treasureObj.carrierId = a.id;
           a.controller.carryingChest = true;
-        } else if (treasureObj.chestState === 'buried' && a.controller.pos.distanceTo(new THREE.Vector3(huntPlan.treasurePos.x, huntPlan.treasurePos.y, huntPlan.treasurePos.z)) < 4.5) {
-          treasureObj.digProgress += 1;
-          if (treasureObj.digProgress >= 2) {
-            treasureObj.chestState = 'carried';
-            treasureObj.carrierId = a.id;
-            a.controller.carryingChest = true;
-            showBanner('⚠️', 'RIVAL UNEARTHED CHEST!', `${a.name} dug up the treasure! Intercept them!`, 4.0);
-          }
+          showBanner('⚠️', 'RIVAL UNEARTHED CHEST!', `${a.name} dug up the treasure! Intercept them!`, 4.0);
         }
       }
+    }
 
-      if (bi.wantsAttack && carrierActor && a.controller.pos.distanceTo(carrierActor.controller.pos) < 2.8) {
-        a.char.anim.playOneShot('slash', 0.08);
-        carrierActor.controller.carryingChest = false;
-        carrierActor.controller.knockedDownTimer = 1.8;
-        carrierActor.char.anim.playOneShot('knockdown', 0.08);
-        treasureObj.chestState = 'dropped';
-        treasureObj.carrierId = null;
-        treasureObj.chestPos.copy(carrierActor.controller.pos);
-      }
+    if (bi.wantsAttack && carrierActor && a.controller.pos.distanceTo(carrierActor.controller.pos) < 2.8) {
+      a.char.anim.playOneShot('slash', 0.08);
+      carrierActor.controller.carryingChest = false;
+      carrierActor.controller.knockedDownTimer = 1.8;
+      carrierActor.char.anim.playOneShot('knockdown', 0.08);
+      treasureObj.chestState = 'dropped';
+      treasureObj.carrierId = null;
+      treasureObj.chestPos.copy(carrierActor.controller.pos);
+    }
 
-      if (a.controller.carryingChest) {
-        const berth = landmarksSys.shipBerths[a.berthIndex % landmarksSys.shipBerths.length];
-        if (a.controller.pos.distanceTo(berth.pos) <= berth.deliveryRadius) {
-          a.score += 1;
-          treasureObj.chestState = 'delivered';
-          endMatch(a.name, 'Bot rival delivered the buried treasure to their ship!');
-          return;
-        }
+    if (a.controller.carryingChest) {
+      const berth = landmarksSys.shipBerths[a.berthIndex % landmarksSys.shipBerths.length];
+      if (a.controller.pos.distanceTo(berth.pos) <= berth.deliveryRadius) {
+        a.score += 1;
+        treasureObj.chestState = 'delivered';
+        endMatch(a.name, 'Bot rival delivered the buried treasure to their ship!');
+        return;
       }
     }
   }
@@ -994,27 +1135,53 @@ function stepGameplay(dt: number): void {
     }
   }
 
-  // Online 20Hz state upload
+  // Online 20Hz Binary State Upload
   if (isOnlineMatch) {
     netSendAccum += dt;
     if (netSendAccum >= 0.05) {
       netSendAccum = 0;
-      net.send({
-        type: 'input_state',
-        pos: { x: localActor.controller.pos.x, y: localActor.controller.pos.y, z: localActor.controller.pos.z },
-        vel: { x: localActor.controller.vel.x, y: localActor.controller.vel.y, z: localActor.controller.vel.z },
-        yaw: localActor.controller.yaw,
-        animState: localActor.char.anim.currentState
-      });
+      net.sendInputBinary(
+        localActor.controller.pos,
+        localActor.controller.vel,
+        localActor.controller.yaw,
+        localActor.char.anim.currentState
+      );
     }
   }
+}
+
+function updateFrameVisualsAndHUD(dt: number): void {
+  if (!localActor || !landmarksSys || !treasureObj) return;
+
+  // Spatial Ambient Audio Mix
+  const shoreDist = Math.abs(Math.hypot(localActor.controller.pos.x, localActor.controller.pos.z) - 720);
+  audio.updateAmbientMix(shoreDist, waterSky.weather.windStrength, localActor.controller.pos.y);
+
+  // Smooth remote player interpolation in Online Mode
+  if (isOnlineMatch) {
+    const qCfg = QUALITY_PRESETS[resolvedQuality];
+    for (const a of actors) {
+      if (a === localActor) continue;
+      const snap = net.getInterpolatedPlayer(a.id);
+      if (snap) {
+        a.controller.pos.set(snap.pos.x, snap.pos.y, snap.pos.z);
+        a.controller.yaw = snap.yaw;
+        a.controller.carryingChest = snap.carryingChest;
+        a.controller.knockedDownTimer = snap.knockedDownTimer;
+        a.char.root.position.copy(a.controller.pos);
+        a.char.root.rotation.y = a.controller.yaw;
+        a.char.anim.setLocomotionState((snap.animState as any) || 'idle');
+        a.char.anim.update(dt, terrainData, a.controller.pos, a.controller.yaw, qCfg.footIK);
+        if (voice.enabled) voice.updateProximityVolume(a.id, a.controller.pos.distanceTo(localActor.controller.pos));
+      }
+    }
+  }
+
+  const myBerth = landmarksSys.shipBerths[localActor.berthIndex % landmarksSys.shipBerths.length];
 
   // Visual updates: chest & clues
   const curCarrier = actors.find((a) => a.id === treasureObj!.carrierId);
   treasureObj.updateVisuals(elapsed, localClueStage, curCarrier?.controller.pos, curCarrier?.controller.yaw || 0);
-
-  // Camera update
-  localActor.controller.updateCamera(camera, camYaw, camPitch, terrainData, localActor.char, dt);
 
   // HUD Updates: Compass, Timer, Minimap, Prompts
   invChestEl.classList.toggle('hidden', !localActor.controller.carryingChest);
@@ -1092,7 +1259,7 @@ function bindAllUI(): void {
   wsUrlInput.value = import.meta.env.VITE_WS_URL || (location.protocol === 'https:' ? '' : 'ws://localhost:8080');
 
   try {
-    const saved = JSON.parse(sessionStorage.getItem('treasure_isle_session') || 'null');
+    const saved = JSON.parse(sessionStorage.getItem('treasure_island_session') || 'null');
     if (saved?.roomCode && saved?.token) {
       document.getElementById('btn-rejoin-saved')!.classList.remove('hidden');
       (document.getElementById('join-code-input') as HTMLInputElement).value = saved.roomCode;
@@ -1143,7 +1310,7 @@ function bindAllUI(): void {
 
   document.getElementById('btn-rejoin-saved')!.addEventListener('click', async () => {
     try {
-      const saved = JSON.parse(sessionStorage.getItem('treasure_isle_session') || 'null');
+      const saved = JSON.parse(sessionStorage.getItem('treasure_island_session') || 'null');
       if (!saved) return;
       await ensureWs();
       net.send({ type: 'join_room', roomCode: saved.roomCode, token: saved.token, ...gatherMeta() });
@@ -1153,6 +1320,7 @@ function bindAllUI(): void {
   });
 
   document.getElementById('btn-online-start')!.addEventListener('click', () => {
+    if (mobileControls.enabled) void mobileControls.requestLandscapeFullscreen();
     net.send({ type: 'update_settings', settings: gatherMeta().settings });
     net.send({ type: 'start_match' });
   });
@@ -1178,10 +1346,19 @@ function bindAllUI(): void {
 
   net.on('joined_room', (msg) => {
     renderRoster(msg.room);
-    if (msg.rejoined && msg.room.phase === 'playing') startOnlineMatch(msg);
+    if (msg.rejoined && msg.room.phase === 'playing') void startOnlineMatch(msg);
   });
   net.on('room_update', (msg) => renderRoster(msg.room));
-  net.on('match_started', (msg) => startOnlineMatch(msg));
+  net.on('match_started', (msg) => void startOnlineMatch(msg));
+  net.on('snapshot', (msg) => {
+    if (typeof msg.timeLeft === 'number') timeLeft = msg.timeLeft;
+    if (treasureObj) {
+      treasureObj.chestState = msg.chestState;
+      treasureObj.carrierId = msg.carrierId;
+      if (msg.chestPos) treasureObj.chestPos.set(msg.chestPos.x, msg.chestPos.y, msg.chestPos.z);
+    }
+    if (localActor) localActor.controller.carryingChest = msg.carrierId === localActor.id;
+  });
   net.on('chat', (msg) => addChatMessage(msg.sender, msg.text));
   net.on('correct_pos', (msg) => {
     if (localActor && msg.pos) localActor.controller.pos.set(msg.pos.x, msg.pos.y, msg.pos.z);
@@ -1222,11 +1399,11 @@ function bindAllUI(): void {
   net.on('match_ended', (msg) => endMatch(msg.winnerName, msg.reason));
 
   // Buttons
-  startOffBtn.addEventListener('click', startOfflineMatch);
+  startOffBtn.addEventListener('click', () => { void startOfflineMatch(); });
   document.getElementById('btn-play-again')!.addEventListener('click', () => {
     resultsScreen.classList.add('hidden');
     if (isOnlineMatch && net.room?.hostId === net.playerId) net.send({ type: 'start_match' });
-    else if (!isOnlineMatch) startOfflineMatch();
+    else if (!isOnlineMatch) void startOfflineMatch();
     else returnToLobby();
   });
   document.getElementById('btn-back-lobby')!.addEventListener('click', returnToLobby);
@@ -1240,10 +1417,9 @@ function bindAllUI(): void {
   document.getElementById('btn-hud-wardrobe')!.addEventListener('click', toggleWardrobeModal);
   document.getElementById('btn-close-wardrobe')!.addEventListener('click', toggleWardrobeModal);
   document.getElementById('btn-hud-chat')!.addEventListener('click', () => hudChatWrapEl.classList.toggle('chat-collapsed'));
-  document.getElementById('btn-dismiss-rotate')!.addEventListener('click', () => {
-    rotateDismissed = true;
-    rotatePromptEl.classList.add('hidden');
-  });
+  document.getElementById('btn-fullscreen-lobby')!.addEventListener('click', () => { void mobileControls.requestLandscapeFullscreen(); });
+  document.getElementById('btn-hud-fullscreen')!.addEventListener('click', () => { void mobileControls.requestLandscapeFullscreen(); });
+  document.getElementById('btn-try-landscape')!.addEventListener('click', () => { void mobileControls.requestLandscapeFullscreen(); });
 
   document.getElementById('btn-open-tutorial')!.addEventListener('click', () => { tutorialModal.classList.remove('hidden'); syncPlayingLockState(); });
   document.getElementById('btn-close-tutorial')!.addEventListener('click', () => { tutorialModal.classList.add('hidden'); syncPlayingLockState(); });
@@ -1313,11 +1489,22 @@ function bindAllUI(): void {
     mobileControls.applySettings();
   });
 
+  const btnSizeSel = document.getElementById('opt-btn-size') as HTMLSelectElement;
+  btnSizeSel.addEventListener('change', () => {
+    mobileControls.buttonSize = btnSizeSel.value as 'small' | 'medium' | 'large';
+    mobileControls.applySettings();
+  });
+
   const opInp = document.getElementById('opt-btn-opacity') as HTMLInputElement;
   opInp.addEventListener('input', () => {
     mobileControls.buttonOpacity = parseFloat(opInp.value);
     mobileControls.applySettings();
     document.getElementById('opacity-val')!.textContent = `${Math.round(mobileControls.buttonOpacity * 100)}%`;
+  });
+
+  (document.getElementById('opt-fps-toggle') as HTMLInputElement).addEventListener('change', (e) => {
+    showFpsCounter = (e.target as HTMLInputElement).checked;
+    fpsCounterEl.classList.toggle('hidden', !showFpsCounter);
   });
 
   (document.getElementById('opt-subtitles') as HTMLInputElement).addEventListener('change', (e) => {
@@ -1341,7 +1528,7 @@ function bindAllUI(): void {
   });
   document.getElementById('btn-reset-keys')!.addEventListener('click', () => {
     keybinds = { ...DEFAULT_KEYS };
-    localStorage.setItem('treasure_isle_keys', JSON.stringify(keybinds));
+    localStorage.setItem('treasure_island_keys', JSON.stringify(keybinds));
     renderKeys();
   });
 }
@@ -1372,7 +1559,7 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     keybinds[rebindingKey] = e.code;
     rebindingKey = null;
-    localStorage.setItem('treasure_isle_keys', JSON.stringify(keybinds));
+    localStorage.setItem('treasure_island_keys', JSON.stringify(keybinds));
     renderKeys();
     return;
   }
@@ -1416,33 +1603,57 @@ window.addEventListener('mousemove', (e) => {
 });
 
 function handleResize(): void {
-  const w = window.innerWidth;
-  const h = Math.max(1, window.innerHeight);
+  const w = window.visualViewport?.width || window.innerWidth;
+  const h = Math.max(1, window.visualViewport?.height || window.innerHeight);
   camera.aspect = w / h;
   camera.updateProjectionMatrix();
   applyQualityPreset(qualityPreset);
   lobbyPreview?.resize();
   ingamePreview?.resize();
-  updateRotatePrompt();
+  updateRotateOverlay();
 }
 window.addEventListener('resize', handleResize);
+window.visualViewport?.addEventListener('resize', handleResize);
 window.addEventListener('orientationchange', () => setTimeout(handleResize, 120));
+
+// Diagnostic performance & benchmark hook
+(window as unknown as { __treasureBench?: () => Record<string, unknown> }).__treasureBench = () => {
+  const mem = (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory;
+  return {
+    fps: currentFps,
+    avgFrameMs: Number(avgFrameMs.toFixed(2)),
+    drawCalls: renderer.info.render.calls,
+    triangles: renderer.info.render.triangles,
+    geometries: renderer.info.memory.geometries,
+    textures: renderer.info.memory.textures,
+    resolvedQuality,
+    dynamicResScale,
+    heapMB: mem ? Number((mem.usedJSHeapSize / 1048576).toFixed(1)) : null
+  };
+};
 
 // --- BOOTSTRAP ---
 async function boot(): Promise<void> {
-  loadingBar.style.width = '25%';
+  if ('serviceWorker' in navigator && import.meta.env.PROD) {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  }
+
+  loadingBar.style.width = '20%';
   waterSky = new WaterAndSkySystem(scene);
   applyQualityPreset(qualityPreset);
 
-  loadingStatus.textContent = 'Loading rigged humanoid & modular clothing GLBs...';
-  loadingBar.style.width = '55%';
-  const assets = await loadCharacterAssets(renderer);
+  loadingStatus.textContent = 'Generating island heightmap & rigging pirate crew...';
+  loadingBar.style.width = '50%';
+
+  const [assets] = await Promise.all([
+    loadCharacterAssets(renderer),
+    buildIslandWorld(424242, true)
+  ]);
   baseGltf = assets.baseGltf;
   clothingGltf = assets.clothingGltf;
 
-  loadingStatus.textContent = 'Generating 2 km × 2 km tropical island...';
-  loadingBar.style.width = '85%';
-  buildIslandWorld(424242, true);
+  loadingStatus.textContent = 'Streaming shoreline terrain & wardrobe...';
+  loadingBar.style.width = '88%';
 
   lobbyPreview = new WardrobePreview(
     document.getElementById('lobby-preview-canvas') as HTMLCanvasElement,
@@ -1453,6 +1664,7 @@ async function boot(): Promise<void> {
   populateWardrobeUI(document.getElementById('lobby-wardrobe-controls')!, (l) => lobbyPreview?.setLoadout(l));
 
   bindAllUI();
+  updateRotateOverlay();
   loadingBar.style.width = '100%';
   loadingScreen.classList.add('hidden');
   lobbyScreen.classList.remove('hidden');

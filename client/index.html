@@ -3,7 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
-  <title>Treasure Isle — Open-World Pirate Multiplayer</title>
+  <meta name="theme-color" content="#0b2239" />
+  <title>Treasure Island — Open-World Pirate Multiplayer</title>
+  <link rel="manifest" href="/manifest.webmanifest" />
   <link rel="stylesheet" href="/src/styles.css" />
 </head>
 <body>
@@ -12,7 +14,7 @@
   <!-- LOADING SCREEN -->
   <div id="loading-screen" class="loading-screen">
     <div class="loading-box">
-      <h1>TREASURE ISLE</h1>
+      <h1>TREASURE ISLAND</h1>
       <p id="loading-status">Charting island terrain &amp; rigging pirate crew...</p>
       <div class="progress-track"><div id="loading-bar" class="progress-fill"></div></div>
     </div>
@@ -22,7 +24,17 @@
   <div id="webgl-fallback" class="loading-screen hidden">
     <div class="loading-box">
       <h1>WebGL Unavailable</h1>
-      <p>Treasure Isle requires hardware-accelerated WebGL to render the 2 km × 2 km tropical island. Enable WebGL or update your browser graphics drivers.</p>
+      <p>Treasure Island requires hardware-accelerated WebGL to render the 2 km × 2 km tropical island. Enable WebGL or update your browser graphics drivers.</p>
+    </div>
+  </div>
+
+  <!-- LANDSCAPE-ONLY FULL-SCREEN ROTATE OVERLAY (Touch Portrait) -->
+  <div id="rotate-overlay" class="rotate-overlay hidden" role="dialog" aria-live="polite">
+    <div class="rotate-card">
+      <div class="rotate-icon">📱↻</div>
+      <h2>Rotate Your Phone</h2>
+      <p><strong>Treasure Island</strong> is designed for landscape play only. Turn your phone sideways to continue.</p>
+      <button id="btn-try-landscape" class="btn-primary" type="button">Enter Landscape Fullscreen</button>
     </div>
   </div>
 
@@ -31,7 +43,7 @@
     <div class="lobby-card">
       <div class="title-banner">
         <div class="badge-pill">2 KM × 2 KM OPEN WORLD • UP TO 9 PIRATES</div>
-        <h1>TREASURE ISLE</h1>
+        <h1>TREASURE ISLAND</h1>
         <p class="subtitle-tagline">Follow the clues, dig up the buried chest, and bring it back to your ship!</p>
       </div>
 
@@ -123,6 +135,7 @@
             <div class="secondary-actions">
               <button id="btn-open-tutorial" class="btn-secondary" type="button">Controls &amp; Guide</button>
               <button id="btn-open-settings" class="btn-secondary" type="button">Quality &amp; Accessibility</button>
+              <button id="btn-fullscreen-lobby" class="btn-secondary mobile-only" type="button">⛶ Fullscreen</button>
             </div>
           </div>
         </section>
@@ -174,18 +187,14 @@
       </div>
 
       <div class="hud-top-right">
+        <div id="fps-counter" class="fps-pill hidden">60 FPS</div>
         <button id="btn-hud-map" class="icon-btn" title="Full Map [M]">🗺</button>
         <button id="btn-hud-wardrobe" class="icon-btn" title="Wardrobe [C] (Near Ship/Camp)">👕</button>
         <button id="btn-hud-chat" class="icon-btn mobile-only" title="Toggle Chat">💬</button>
+        <button id="btn-hud-fullscreen" class="icon-btn mobile-only" title="Fullscreen">⛶</button>
         <button id="btn-hud-settings" class="icon-btn" title="Settings & Quality">⚙</button>
         <button id="btn-hud-leave" class="icon-btn warn" title="Leave Expedition">🚪</button>
       </div>
-    </div>
-
-    <!-- Portrait Rotate Prompt (Touch Only) -->
-    <div id="rotate-prompt" class="rotate-prompt hidden">
-      <span>📱 Rotate to landscape for the widest view!</span>
-      <button id="btn-dismiss-rotate" class="btn-small" type="button">OK</button>
     </div>
 
     <!-- Minimap (Top-Right below Buttons) -->
@@ -251,6 +260,9 @@
           <button id="m-btn-emote" class="m-btn m-btn-small" type="button" aria-label="Emote">💃</button>
           <button id="m-btn-map" class="m-btn m-btn-small m-map" type="button" aria-label="Map">🗺</button>
           <button id="m-btn-wardrobe" class="m-btn m-btn-small m-wardrobe" type="button" aria-label="Wardrobe">👕</button>
+          <button id="m-btn-shove" class="m-btn m-btn-med m-shove" type="button" aria-label="Shove">
+            <span class="m-icon">🥾</span><span class="m-label">SHOVE</span>
+          </button>
           <button id="m-btn-sprint" class="m-btn m-btn-med m-sprint" type="button" aria-label="Sprint">
             <span class="m-icon">🏃</span><span class="m-label">SPRINT</span>
           </button>
@@ -306,11 +318,11 @@
   <!-- TUTORIAL MODAL -->
   <div id="tutorial-modal" class="modal hidden">
     <div class="modal-card">
-      <h2>Explorer’s Guide — Treasure Isle</h2>
+      <h2>Explorer’s Guide — Treasure Island</h2>
       <div class="tutorial-steps">
         <div class="t-step"><strong>1. Follow the Clues:</strong> Your compass at the top points toward your current clue (caves, ruins, shipwrecks, camps). Press <code>E</code> (or <code>DIG/E</code>) near a clue scroll or carved X stone to unlock the next riddle.</div>
         <div class="t-step"><strong>2. Dig Up the Chest:</strong> Once near the carved X rock, use your Shovel (<code>E</code>) to dig! Watch for warm/cold soil feedback. Unearthing the chest takes two digs.</div>
-        <div class="t-step"><strong>3. Fight &amp; Deliver:</strong> Carrying the heavy chest slows you down. Swing your Cutlass (<code>F</code> / Click) or Shove (<code>X</code>) to knock rivals down and steal the chest, then carry it back to your Ship Berth!</div>
+        <div class="t-step"><strong>3. Fight &amp; Deliver:</strong> Carrying the heavy chest slows you down. Swing your Cutlass (<code>F</code> / Click) or Shove (<code>X</code>) to knock rivals down and steal clues or the chest, then carry it back to your Ship Berth!</div>
         <div class="t-step"><strong>4. Customize Anytime:</strong> Open your Wardrobe (<code>C</code>) when standing next to your ship dock or any camp chest!</div>
       </div>
       <div class="modal-footer">
@@ -328,8 +340,9 @@
           <div>
             <label for="opt-quality">Graphics Preset</label>
             <select id="opt-quality">
-              <option value="low">Low (Mobile / Fast)</option>
-              <option value="medium" selected>Medium (Balanced)</option>
+              <option value="auto" selected>Auto (Hardware Detected)</option>
+              <option value="low">Low (Mobile / 60Hz Battery)</option>
+              <option value="medium">Medium (Balanced, No PostFX)</option>
               <option value="high">High (Crisp + Bloom)</option>
               <option value="ultra">Ultra (SSAO + Max Foliage)</option>
             </select>
@@ -349,10 +362,19 @@
             </select>
           </div>
           <div>
-            <label for="opt-btn-opacity">Touch Opacity: <span id="opacity-val">85%</span></label>
-            <input type="range" id="opt-btn-opacity" min="0.35" max="1" step="0.05" value="0.85" />
+            <label for="opt-btn-size">Touch Button Size</label>
+            <select id="opt-btn-size">
+              <option value="small">Compact (&gt;=48px)</option>
+              <option value="medium" selected>Standard</option>
+              <option value="large">Large</option>
+            </select>
           </div>
         </div>
+        <div class="form-row">
+          <label for="opt-btn-opacity">Touch Opacity: <span id="opacity-val">85%</span></label>
+          <input type="range" id="opt-btn-opacity" min="0.35" max="1" step="0.05" value="0.85" />
+        </div>
+        <label class="toggle-row"><input type="checkbox" id="opt-fps-toggle" /><span>Show Live FPS Counter</span></label>
         <label class="toggle-row"><input type="checkbox" id="opt-subtitles" checked /><span>Subtitles for Audio Cues</span></label>
         <label class="toggle-row"><input type="checkbox" id="opt-colorblind" /><span>Colorblind-Friendly Markers &amp; Shapes</span></label>
         <label class="toggle-row"><input type="checkbox" id="opt-reduced-motion" /><span>Reduced Motion (Calm Camera &amp; UI)</span></label>

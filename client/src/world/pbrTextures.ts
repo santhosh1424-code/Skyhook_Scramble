@@ -122,6 +122,7 @@ export interface WorldTextureBundle {
   dirt: MaterialTextureSet;
   rock: MaterialTextureSet;
   mud: MaterialTextureSet;
+  detailMap: THREE.CanvasTexture;
   waterNormal: THREE.CanvasTexture;
   clothNormal: THREE.CanvasTexture;
   leatherNormal: THREE.CanvasTexture;
@@ -154,6 +155,7 @@ export function getWorldTextures(): WorldTextureBundle {
   const clothNormal = makeSurfaceSet([128, 128, 128], [20, 20, 20], 606, true, 1.8, 64).normalMap;
   const leatherNormal = makeSurfaceSet([128, 128, 128], [30, 30, 30], 707, false, 2.6, 64).normalMap;
   const metalNormal = makeSurfaceSet([128, 128, 128], [14, 14, 14], 808, false, 1.2, 64).normalMap;
+  const detailMap = makeSurfaceSet([210, 210, 210], [65, 65, 65], 959, false, 1.4, 128).map;
 
   cachedBundle = {
     sand,
@@ -161,6 +163,7 @@ export function getWorldTextures(): WorldTextureBundle {
     dirt,
     rock,
     mud,
+    detailMap,
     waterNormal,
     clothNormal,
     leatherNormal,

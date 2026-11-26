@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { createRng } from '@shared/prng';
 import { HALF_WORLD } from '@shared/constants';
 import type { IslandTerrainData } from '@shared/terrain';
+import type { SpatialCollisionGrid } from '@shared/spatialGrid';
 
 interface VegBatch {
   mesh: THREE.InstancedMesh;
@@ -16,7 +17,10 @@ export class VegetationSystem {
     uWind: { value: 1.0 }
   };
 
-  constructor(private readonly terrain: IslandTerrainData) {
+  constructor(
+    private readonly terrain: IslandTerrainData,
+    private readonly spatialGrid?: SpatialCollisionGrid
+  ) {
     this.buildInstancedVegetation();
   }
 
@@ -55,16 +59,17 @@ export class VegetationSystem {
   private buildInstancedVegetation(): void {
     const rng = createRng(this.terrain.seed + 909);
 
-    // 1. Palm Trunks + Crowns (curved trunk + layered fronds)
     const palmPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
     const bushPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
     const fernPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
     const grassPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
+    const flowerPlacements: { x: number; y: number; z: number; scale: number }[] = [];
     const rockPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
     const driftwoodPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
     const coconutPlacements: { x: number; y: number; z: number; scale: number }[] = [];
+    const shellPlacements: { x: number; y: number; z: number; scale: number; yaw: number }[] = [];
 
-    for (let i = 0; i < 6500; i++) {
+    for (let i = 0; i < 6800; i++) {
       const x = (rng() - 0.5) * (HALF_WORLD * 1.82);
       const z = (rng() - 0.5) * (HALF_WORLD * 1.82);
       if (this.nearLandmark(x, z)) continue;
@@ -74,37 +79,48 @@ export class VegetationSystem {
 
       if (s.biome === 'beach') {
         if (s.height > 1.2 && s.slope < 0.3 && palmPlacements.length < 420 && rng() < 0.28) {
-          palmPlacements.push({ x, y: s.height, z, scale: 0.8 + rng() * 0.55, yaw: rng() * Math.PI * 2 });
+          const sc = 0.8 + rng() * 0.55;
+          palmPlacements.push({ x, y: s.height, z, scale: sc, yaw: rng() * Math.PI * 2 });
+          this.spatialGrid?.insert(x, z, 0.38 * sc);
           if (coconutPlacements.length < 180 && rng() < 0.35) {
             coconutPlacements.push({ x: x + (rng() - 0.5) * 1.4, y: this.terrain.getHeight(x, z) + 0.15, z: z + (rng() - 0.5) * 1.4, scale: 0.8 + rng() * 0.4 });
           }
         } else if (s.height < 2.2 && driftwoodPlacements.length < 160 && rng() < 0.14) {
           driftwoodPlacements.push({ x, y: s.height + 0.08, z, scale: 0.8 + rng() * 0.6, yaw: rng() * Math.PI * 2 });
+        } else if (s.height < 1.8 && shellPlacements.length < 320 && rng() < 0.28) {
+          shellPlacements.push({ x, y: s.height + 0.05, z, scale: 0.7 + rng() * 0.5, yaw: rng() * Math.PI * 2 });
         }
       } else if (s.biome === 'jungle' || s.biome === 'swamp') {
         if (s.slope < 0.36 && palmPlacements.length < 420 && rng() < 0.22) {
-          palmPlacements.push({ x, y: s.height, z, scale: 0.9 + rng() * 0.6, yaw: rng() * Math.PI * 2 });
+          const sc = 0.9 + rng() * 0.6;
+          palmPlacements.push({ x, y: s.height, z, scale: sc, yaw: rng() * Math.PI * 2 });
+          this.spatialGrid?.insert(x, z, 0.4 * sc);
         } else if (s.slope < 0.42 && bushPlacements.length < 520 && rng() < 0.35) {
           bushPlacements.push({ x, y: s.height, z, scale: 0.7 + rng() * 0.8, yaw: rng() * Math.PI * 2 });
         } else if (fernPlacements.length < 700 && rng() < 0.45) {
           fernPlacements.push({ x, y: s.height, z, scale: 0.75 + rng() * 0.65, yaw: rng() * Math.PI * 2 });
+        } else if (flowerPlacements.length < 350 && rng() < 0.25) {
+          flowerPlacements.push({ x, y: s.height + 0.12, z, scale: 0.8 + rng() * 0.5 });
         }
       } else if (s.biome === 'grassland') {
         if (grassPlacements.length < 1400 && s.slope < 0.4 && rng() < 0.65) {
           grassPlacements.push({ x, y: s.height, z, scale: 0.7 + rng() * 0.7, yaw: rng() * Math.PI * 2 });
-        } else if (bushPlacements.length < 520 && rng() < 0.16) {
+        } else if (flowerPlacements.length < 350 && rng() < 0.18) {
+          flowerPlacements.push({ x, y: s.height + 0.12, z, scale: 0.8 + rng() * 0.5 });
+        } else if (bushPlacements.length < 520 && rng() < 0.15) {
           bushPlacements.push({ x, y: s.height, z, scale: 0.65 + rng() * 0.65, yaw: rng() * Math.PI * 2 });
         }
       }
 
       if ((s.biome === 'cliff' || s.biome === 'volcano' || s.slope > 0.38) && rockPlacements.length < 480 && rng() < 0.4) {
-        rockPlacements.push({ x, y: s.height - 0.15, z, scale: 0.7 + rng() * 1.8, yaw: rng() * Math.PI * 2 });
+        const sc = 0.7 + rng() * 1.8;
+        rockPlacements.push({ x, y: s.height - 0.15, z, scale: sc, yaw: rng() * Math.PI * 2 });
+        this.spatialGrid?.insert(x, z, 0.9 * sc);
       }
     }
 
     const dummy = new THREE.Object3D();
 
-    // Palm trunks
     const trunkGeo = new THREE.CylinderGeometry(0.16, 0.32, 6.2, 7);
     trunkGeo.translate(0, 3.0, 0);
     trunkGeo.rotateZ(0.12);
@@ -116,7 +132,6 @@ export class VegetationSystem {
     trunkMesh.castShadow = true;
     trunkMesh.receiveShadow = true;
 
-    // Palm frond crowns (merged 6-frond star)
     const crownGeo = new THREE.ConeGeometry(2.5, 1.4, 7);
     crownGeo.translate(-0.7, 5.9, 0);
     const crownMesh = new THREE.InstancedMesh(
@@ -137,7 +152,7 @@ export class VegetationSystem {
     this.group.add(trunkMesh, crownMesh);
     this.batches.push({ mesh: trunkMesh, maxCount: palmPlacements.length }, { mesh: crownMesh, maxCount: palmPlacements.length });
 
-    // Jungle bushes
+    // Bushes
     const bushGeo = new THREE.DodecahedronGeometry(1.15, 1);
     bushGeo.translate(0, 0.75, 0);
     const bushMesh = new THREE.InstancedMesh(
@@ -146,7 +161,6 @@ export class VegetationSystem {
       Math.max(1, bushPlacements.length)
     );
     bushMesh.castShadow = true;
-    bushMesh.receiveShadow = true;
     bushPlacements.forEach((p, i) => {
       dummy.position.set(p.x, p.y - 0.1, p.z);
       dummy.rotation.set(0, p.yaw, 0);
@@ -194,6 +208,23 @@ export class VegetationSystem {
     this.group.add(grassMesh);
     this.batches.push({ mesh: grassMesh, maxCount: grassPlacements.length });
 
+    // Tropical Flowers
+    const flowerGeo = new THREE.DodecahedronGeometry(0.22, 0);
+    const flowerMesh = new THREE.InstancedMesh(
+      flowerGeo,
+      new THREE.MeshStandardMaterial({ color: 0xff6b8b, roughness: 0.7 }),
+      Math.max(1, flowerPlacements.length)
+    );
+    flowerPlacements.forEach((p, i) => {
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      flowerMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.group.add(flowerMesh);
+    this.batches.push({ mesh: flowerMesh, maxCount: flowerPlacements.length });
+
     // Rocks
     const rockGeo = new THREE.DodecahedronGeometry(1.1, 0);
     rockGeo.translate(0, 0.45, 0);
@@ -203,7 +234,6 @@ export class VegetationSystem {
       Math.max(1, rockPlacements.length)
     );
     rockMesh.castShadow = true;
-    rockMesh.receiveShadow = true;
     rockPlacements.forEach((p, i) => {
       dummy.position.set(p.x, p.y, p.z);
       dummy.rotation.set(rng() * 0.4, p.yaw, rng() * 0.4);
@@ -222,7 +252,6 @@ export class VegetationSystem {
       new THREE.MeshStandardMaterial({ color: 0x8e7960, roughness: 0.95 }),
       Math.max(1, driftwoodPlacements.length)
     );
-    driftMesh.castShadow = true;
     driftwoodPlacements.forEach((p, i) => {
       dummy.position.set(p.x, p.y, p.z);
       dummy.rotation.set(0, p.yaw, 0.04);
@@ -233,10 +262,9 @@ export class VegetationSystem {
     this.group.add(driftMesh);
     this.batches.push({ mesh: driftMesh, maxCount: driftwoodPlacements.length });
 
-    // Coconuts
-    const cocoGeo = new THREE.SphereGeometry(0.18, 7, 6);
+    // Coconuts & Seashells
     const cocoMesh = new THREE.InstancedMesh(
-      cocoGeo,
+      new THREE.SphereGeometry(0.18, 7, 6),
       new THREE.MeshStandardMaterial({ color: 0x4b301b, roughness: 0.88 }),
       Math.max(1, coconutPlacements.length)
     );
@@ -249,6 +277,21 @@ export class VegetationSystem {
     });
     this.group.add(cocoMesh);
     this.batches.push({ mesh: cocoMesh, maxCount: coconutPlacements.length });
+
+    const shellMesh = new THREE.InstancedMesh(
+      new THREE.ConeGeometry(0.14, 0.22, 5),
+      new THREE.MeshStandardMaterial({ color: 0xf4e3cf, roughness: 0.6 }),
+      Math.max(1, shellPlacements.length)
+    );
+    shellPlacements.forEach((p, i) => {
+      dummy.position.set(p.x, p.y, p.z);
+      dummy.rotation.set(Math.PI / 2, p.yaw, 0);
+      dummy.scale.setScalar(p.scale);
+      dummy.updateMatrix();
+      shellMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.group.add(shellMesh);
+    this.batches.push({ mesh: shellMesh, maxCount: shellPlacements.length });
   }
 
   public setDensity(density: number): void {

@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import { HALF_WORLD, MOVE_SPEEDS, WATER_LEVEL } from '@shared/constants';
 import type { IslandTerrainData } from '@shared/terrain';
+import type { SpatialCollisionGrid } from '@shared/spatialGrid';
 import type { HumanoidCharacter } from './humanoidRig';
 
 export interface PlayerInputState {
-  moveX: number; // -1..1 right
-  moveZ: number; // -1..1 forward/back
+  moveX: number;
+  moveZ: number;
   sprint: boolean;
   jumpPressed: boolean;
   camYaw: number;
@@ -13,6 +14,8 @@ export interface PlayerInputState {
 
 export class PlayerPhysicsController {
   public pos = new THREE.Vector3(0, 10, 0);
+  public prevPos = new THREE.Vector3(0, 10, 0);
+  public renderPos = new THREE.Vector3(0, 10, 0);
   public vel = new THREE.Vector3();
   public yaw = 0;
   public grounded = false;
@@ -25,16 +28,22 @@ export class PlayerPhysicsController {
   public firstPerson = false;
 
   public coyoteTimer = 0;
-  private landTimer = 0;
+  private camCurrentPos = new THREE.Vector3();
+  private camVelocity = new THREE.Vector3();
+  private camInitialized = false;
 
   public step(
     dt: number,
     input: PlayerInputState,
     terrain: IslandTerrainData,
     char: HumanoidCharacter,
-    raining: boolean
+    raining: boolean,
+    spatialGrid?: SpatialCollisionGrid,
+    enableFootIK = true
   ): { surface: 'sand' | 'grass' | 'rock' | 'mud' | 'water'; stepped: boolean } {
+    this.prevPos.copy(this.pos);
     this.wasGrounded = this.grounded;
+
     if (this.knockedDownTimer > 0) {
       this.knockedDownTimer = Math.max(0, this.knockedDownTimer - dt);
       if (this.knockedDownTimer === 0) {
@@ -43,7 +52,6 @@ export class PlayerPhysicsController {
       }
     }
     if (this.hitStunTimer > 0) this.hitStunTimer = Math.max(0, this.hitStunTimer - dt);
-    if (this.landTimer > 0) this.landTimer = Math.max(0, this.landTimer - dt);
 
     const sample = terrain.sample(this.pos.x, this.pos.z);
     const groundY = sample.height;
@@ -52,10 +60,8 @@ export class PlayerPhysicsController {
     this.wading = waterDepth > 0.15 && waterDepth <= 1.15 && this.pos.y <= WATER_LEVEL + 0.1;
     this.inWater = waterDepth > 1.15 && this.pos.y <= WATER_LEVEL - 0.15;
 
-    // Update wetness & mud shaders
     char.updateEnvironmentSurface(dt, this.inWater || this.wading, raining, sample.biome === 'swamp');
 
-    // Movement vector in camera yaw space
     const fwd = new THREE.Vector3(-Math.sin(input.camYaw), 0, -Math.cos(input.camYaw));
     const right = new THREE.Vector3(Math.cos(input.camYaw), 0, -Math.sin(input.camYaw));
     const moveDir = new THREE.Vector3()
@@ -74,7 +80,7 @@ export class PlayerPhysicsController {
     if (this.carryingChest) speed *= MOVE_SPEEDS.carryMult;
 
     if (canControl) {
-      const accel = this.grounded || this.inWater ? 14 : 5;
+      const accel = this.grounded || this.inWater ? 16 : 6;
       this.vel.x = THREE.MathUtils.lerp(this.vel.x, moveDir.x * speed * moveMag, Math.min(1, dt * accel));
       this.vel.z = THREE.MathUtils.lerp(this.vel.z, moveDir.z * speed * moveMag, Math.min(1, dt * accel));
 
@@ -83,25 +89,23 @@ export class PlayerPhysicsController {
         let diff = targetYaw - this.yaw;
         while (diff > Math.PI) diff -= Math.PI * 2;
         while (diff < -Math.PI) diff += Math.PI * 2;
-        this.yaw += diff * Math.min(1, dt * 11);
+        this.yaw += diff * Math.min(1, dt * 13);
       }
     } else {
       this.vel.x *= 0.92;
       this.vel.z *= 0.92;
     }
 
-    // Slope steepness pushback
     if (this.grounded && sample.slope > 0.65) {
-      const eps = 1.5;
+      const eps = 4.0;
       const gx = terrain.getHeight(this.pos.x + eps, this.pos.z) - terrain.getHeight(this.pos.x - eps, this.pos.z);
       const gz = terrain.getHeight(this.pos.x, this.pos.z + eps) - terrain.getHeight(this.pos.x, this.pos.z - eps);
       const downSlope = new THREE.Vector3(-gx, 0, -gz).normalize();
       this.vel.addScaledVector(downSlope, 16 * dt);
     }
 
-    // Ledge climb: if moving into a step 0.6..1.6m higher right ahead
     if (canControl && moveMag > 0.4 && input.jumpPressed && !this.inWater) {
-      const aheadY = terrain.getHeight(this.pos.x + moveDir.x * 1.15, this.pos.z + moveDir.z * 1.15);
+      const aheadY = terrain.getHeight(this.pos.x + moveDir.x * 1.2, this.pos.z + moveDir.z * 1.2);
       const stepH = aheadY - this.pos.y;
       if (stepH > 0.55 && stepH <= 1.65) {
         this.vel.y = 7.8;
@@ -124,7 +128,6 @@ export class PlayerPhysicsController {
       }
     }
 
-    // Gravity / Buoyancy
     if (this.inWater) {
       const targetSwimY = WATER_LEVEL - 1.05;
       const buoy = (targetSwimY - this.pos.y) * 14;
@@ -135,7 +138,9 @@ export class PlayerPhysicsController {
 
     this.pos.addScaledVector(this.vel, dt);
 
-    // Clamp to outer ocean boundary
+    // O(1) spatial-grid collision against trees, rocks, and landmarks
+    spatialGrid?.resolveXZ(this.pos, 0.42);
+
     const maxBound = HALF_WORLD + 160;
     this.pos.x = THREE.MathUtils.clamp(this.pos.x, -maxBound, maxBound);
     this.pos.z = THREE.MathUtils.clamp(this.pos.z, -maxBound, maxBound);
@@ -143,7 +148,6 @@ export class PlayerPhysicsController {
     const newGroundY = terrain.getHeight(this.pos.x, this.pos.z);
     if (this.pos.y <= newGroundY) {
       if (!this.wasGrounded && this.vel.y < -9 && !this.inWater) {
-        this.landTimer = 0.22;
         char.anim.playOneShot('land', 0.08);
       }
       this.pos.y = newGroundY;
@@ -153,32 +157,18 @@ export class PlayerPhysicsController {
       this.grounded = false;
     }
 
-    // Update character transform & animation state machine
-    char.root.position.copy(this.pos);
-    char.root.rotation.y = this.yaw;
-
     const horizSpeed = Math.hypot(this.vel.x, this.vel.z);
-    if (this.knockedDownTimer > 0) {
-      char.anim.setLocomotionState('knockdown');
-    } else if (this.carryingChest) {
-      char.anim.setLocomotionState(horizSpeed > 0.4 ? 'carry' : 'idle');
-    } else if (this.inWater) {
-      char.anim.setLocomotionState('swim');
-    } else if (!this.grounded && this.pos.y - newGroundY > 0.65) {
-      char.anim.setLocomotionState('fall');
-    } else if (this.wading && horizSpeed > 0.3) {
-      char.anim.setLocomotionState('wade');
-    } else if (horizSpeed > 6.8) {
-      char.anim.setLocomotionState('sprint');
-    } else if (horizSpeed > 4.2) {
-      char.anim.setLocomotionState('run');
-    } else if (horizSpeed > 0.35) {
-      char.anim.setLocomotionState('walk');
-    } else {
-      char.anim.setLocomotionState('idle');
-    }
+    if (this.knockedDownTimer > 0) char.anim.setLocomotionState('knockdown');
+    else if (this.carryingChest) char.anim.setLocomotionState(horizSpeed > 0.4 ? 'carry' : 'idle');
+    else if (this.inWater) char.anim.setLocomotionState('swim');
+    else if (!this.grounded && this.pos.y - newGroundY > 0.65) char.anim.setLocomotionState('fall');
+    else if (this.wading && horizSpeed > 0.3) char.anim.setLocomotionState('wade');
+    else if (horizSpeed > 6.8) char.anim.setLocomotionState('sprint');
+    else if (horizSpeed > 4.2) char.anim.setLocomotionState('run');
+    else if (horizSpeed > 0.35) char.anim.setLocomotionState('walk');
+    else char.anim.setLocomotionState('idle');
 
-    char.anim.update(dt, terrain, this.pos, this.yaw, this.grounded);
+    char.anim.update(dt, terrain, this.pos, this.yaw, this.grounded, enableFootIK);
 
     const surface = this.inWater || this.wading
       ? 'water'
@@ -190,31 +180,34 @@ export class PlayerPhysicsController {
     return { surface, stepped: (this.grounded || this.wading) && horizSpeed > 0.6 };
   }
 
-  public updateCamera(
+  /** Fixed-step visual interpolation + critically damped smooth follow camera */
+  public updateRenderAndCamera(
+    alpha: number,
+    dt: number,
     camera: THREE.PerspectiveCamera,
     camYaw: number,
     camPitch: number,
     terrain: IslandTerrainData,
-    char: HumanoidCharacter,
-    dt: number
+    char: HumanoidCharacter
   ): void {
+    this.renderPos.lerpVectors(this.prevPos, this.pos, alpha);
+    char.root.position.copy(this.renderPos);
+    char.root.rotation.y = this.yaw;
     char.root.visible = !this.firstPerson;
 
     if (this.firstPerson) {
-      const eye = this.pos.clone().add(new THREE.Vector3(0, 1.62, 0));
+      const eye = this.renderPos.clone().add(new THREE.Vector3(0, 1.62, 0));
       camera.position.copy(eye);
-      const look = eye.clone().add(
-        new THREE.Vector3(
-          -Math.sin(camYaw) * Math.cos(camPitch),
-          -Math.sin(camPitch),
-          -Math.cos(camYaw) * Math.cos(camPitch)
-        )
+      camera.lookAt(
+        eye.x - Math.sin(camYaw) * Math.cos(camPitch),
+        eye.y - Math.sin(camPitch),
+        eye.z - Math.cos(camYaw) * Math.cos(camPitch)
       );
-      camera.lookAt(look);
+      this.camInitialized = false;
       return;
     }
 
-    const focus = this.pos.clone().add(new THREE.Vector3(0, 1.48, 0));
+    const focus = this.renderPos.clone().add(new THREE.Vector3(0, 1.48, 0));
     const camDist = 5.4;
     const ideal = new THREE.Vector3(
       focus.x + Math.sin(camYaw) * Math.cos(camPitch) * camDist,
@@ -222,16 +215,31 @@ export class PlayerPhysicsController {
       focus.z + Math.cos(camYaw) * Math.cos(camPitch) * camDist
     );
 
-    // Camera terrain collision: pull forward if terrain intersects boom
-    for (let t = 0.25; t <= 1.0; t += 0.15) {
-      const samplePos = focus.clone().lerp(ideal, t);
-      const th = terrain.getHeight(samplePos.x, samplePos.z) + 0.45;
-      if (samplePos.y < th) {
-        ideal.y = Math.max(ideal.y, th + 0.35);
-      }
+    // Cheap O(1) heightmap camera collision (5 samples, zero raycasts!)
+    for (let t = 0.25; t <= 1.0; t += 0.18) {
+      const sx = focus.x + (ideal.x - focus.x) * t;
+      const sy = focus.y + (ideal.y - focus.y) * t;
+      const sz = focus.z + (ideal.z - focus.z) * t;
+      const th = terrain.getHeight(sx, sz) + 0.55;
+      if (sy < th) ideal.y = Math.max(ideal.y, th + 0.35);
     }
 
-    camera.position.lerp(ideal, Math.min(1, dt * 15));
+    if (!this.camInitialized) {
+      this.camCurrentPos.copy(ideal);
+      this.camVelocity.set(0, 0, 0);
+      this.camInitialized = true;
+    } else {
+      // Critically damped spring follow (smoothTime ~ 0.065s — zero lag, zero jitter)
+      const omega = 2.0 / 0.065;
+      const x = omega * dt;
+      const exp = 1.0 / (1.0 + x + 0.48 * x * x + 0.235 * x * x * x);
+      const change = this.camCurrentPos.clone().sub(ideal);
+      const temp = this.camVelocity.clone().addScaledVector(change, omega).multiplyScalar(dt);
+      this.camVelocity.sub(temp.clone().multiplyScalar(omega)).multiplyScalar(exp);
+      this.camCurrentPos.copy(ideal).add(change.add(temp).multiplyScalar(exp));
+    }
+
+    camera.position.copy(this.camCurrentPos);
     camera.lookAt(focus);
   }
 }

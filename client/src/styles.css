@@ -20,7 +20,8 @@ html, body {
   margin: 0;
   padding: 0;
   width: 100%;
-  height: 100%;
+  height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   font-family: 'Georgia', 'Trebuchet MS', system-ui, sans-serif;
   background: #0b2239;
@@ -412,7 +413,21 @@ button { font-family: inherit; cursor: pointer; }
 }
 .mode-sub { color: var(--gold); margin-left: 6px; font-size: 0.68rem; }
 
-.hud-top-right { display: flex; gap: 6px; }
+.fps-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--wood-dark);
+  border: 1px solid rgba(94, 212, 232, 0.45);
+  color: var(--aqua);
+  font-size: 0.74rem;
+  font-weight: 800;
+  font-family: monospace;
+}
+
+.hud-top-right { display: flex; gap: 6px; align-items: center; }
 .icon-btn {
   width: 38px; height: 38px;
   border-radius: 9px;
@@ -516,7 +531,7 @@ body.is-touch-device .hud-bottom-left.chat-collapsed { display: none; }
 }
 
 /* MOBILE CONTROLS */
-.mobile-controls { position: fixed; inset: 0; z-index: 15; pointer-events: none; --mobile-btn-opacity: 0.85; }
+.mobile-controls { position: fixed; inset: 0; z-index: 15; pointer-events: none; --mobile-btn-opacity: 0.85; --mobile-btn-scale: 1; }
 .mobile-joystick-zone { position: absolute; left: 0; top: 20%; bottom: 0; width: 46%; pointer-events: auto; touch-action: none; }
 .joystick-base {
   position: absolute;
@@ -542,10 +557,12 @@ body.is-touch-device .hud-bottom-left.chat-collapsed { display: none; }
 .mobile-actions {
   position: absolute;
   right: calc(14px + var(--safe-right));
-  bottom: calc(16px + var(--safe-bottom));
-  width: 230px; height: 230px;
+  bottom: calc(14px + var(--safe-bottom));
+  width: 246px; height: 220px;
   pointer-events: none;
   opacity: var(--mobile-btn-opacity);
+  transform: scale(var(--mobile-btn-scale));
+  transform-origin: bottom right;
 }
 .m-btn {
   position: absolute; border-radius: 50%;
@@ -554,27 +571,55 @@ body.is-touch-device .hud-bottom-left.chat-collapsed { display: none; }
   color: var(--parchment);
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   pointer-events: auto; touch-action: none;
+  min-width: 48px; min-height: 48px;
 }
 .m-btn.pressed { transform: scale(0.92); filter: brightness(1.2); }
 .m-btn.active { border-color: var(--aqua); box-shadow: 0 0 12px var(--aqua); }
-.m-btn .m-icon { font-size: 1.25rem; line-height: 1; }
-.m-btn .m-label { font-size: 0.58rem; font-weight: 800; margin-top: 2px; }
-.m-btn-large { width: 80px; height: 80px; }
-.m-btn-med { width: 62px; height: 62px; }
-.m-btn-small { width: 42px; height: 42px; font-size: 1.05rem; }
+.m-btn .m-icon { font-size: 1.2rem; line-height: 1; }
+.m-btn .m-label { font-size: 0.56rem; font-weight: 800; margin-top: 2px; }
+.m-btn-large { width: 78px; height: 78px; }
+.m-btn-med { width: 58px; height: 58px; }
+.m-btn-small { width: 48px; height: 48px; font-size: 1.05rem; }
 .m-jump { right: 4px; bottom: 4px; background: rgba(45, 140, 88, 0.88); }
-.m-dig { right: 94px; bottom: 10px; background: rgba(181, 124, 20, 0.88); }
-.m-attack { right: 92px; bottom: 84px; background: rgba(180, 56, 56, 0.88); }
-.m-sprint { right: 12px; bottom: 96px; background: rgba(45, 120, 175, 0.88); }
-.m-map { right: 64px; bottom: 162px; }
-.m-wardrobe { right: 114px; bottom: 162px; }
-#m-btn-emote { right: 14px; bottom: 168px; }
+.m-dig { right: 90px; bottom: 8px; background: rgba(181, 124, 20, 0.88); }
+.m-attack { right: 90px; bottom: 76px; background: rgba(180, 56, 56, 0.88); }
+.m-shove { right: 158px; bottom: 26px; background: rgba(145, 92, 42, 0.88); }
+.m-sprint { right: 12px; bottom: 92px; background: rgba(45, 120, 175, 0.88); }
+.m-map { right: 62px; bottom: 158px; }
+.m-wardrobe { right: 118px; bottom: 158px; }
+#m-btn-emote { right: 6px; bottom: 160px; }
 
-.rotate-prompt {
-  position: fixed; top: calc(68px + var(--safe-top)); left: 50%; transform: translateX(-50%);
-  z-index: 25; display: flex; align-items: center; gap: 8px;
-  background: var(--wood-dark); border: 1px solid var(--aqua); border-radius: 10px;
-  padding: 5px 10px; font-size: 0.74rem; pointer-events: auto;
+/* FULL-SCREEN PORTRAIT LOCK OVERLAY */
+.rotate-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: radial-gradient(circle at center, rgba(16, 46, 72, 0.96), rgba(6, 14, 24, 0.98));
+  backdrop-filter: blur(8px);
+}
+.rotate-card {
+  width: min(380px, 92vw);
+  background: var(--wood-dark);
+  border: 2px solid var(--gold);
+  border-radius: 18px;
+  padding: 24px 20px;
+  text-align: center;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7);
+}
+.rotate-icon {
+  font-size: 3rem;
+  margin-bottom: 10px;
+  animation: rotateWiggle 1.8s ease-in-out infinite;
+}
+.rotate-card h2 { margin: 0 0 8px; color: var(--gold); }
+.rotate-card p { margin: 0 0 16px; font-size: 0.9rem; color: #dcd2bd; line-height: 1.4; }
+@keyframes rotateWiggle {
+  0%, 100% { transform: rotate(0deg); }
+  50% { transform: rotate(-90deg); }
 }
 
 /* MODALS */
@@ -616,10 +661,18 @@ body.is-touch-device .hud-bottom-left.chat-collapsed { display: none; }
 .podium-card.winner { border-color: var(--gold); background: rgba(232, 184, 75, 0.16); }
 
 @media (max-width: 720px), (max-height: 500px) {
-  .hud-top-left { max-width: 46vw; }
+  .hud-top { padding: calc(6px + var(--safe-top)) calc(8px + var(--safe-right)) 0 calc(8px + var(--safe-left)); gap: 6px; }
+  .hud-top-left { max-width: 42vw; }
   .clue-panel { width: min(210px, 100%); padding: 5px 8px; }
-  #minimap-canvas { width: 92px; height: 92px; }
-  .mobile-actions { transform: scale(0.86); transform-origin: bottom right; }
+  .clue-riddle { display: none; }
+  .compass-bar { min-width: 170px; padding: 3px 10px; font-size: 0.72rem; }
+  .icon-btn { width: 34px; height: 34px; font-size: 0.9rem; }
+  .minimap-wrap { top: calc(50px + var(--safe-top)); right: calc(8px + var(--safe-right)); }
+  #minimap-canvas { width: 82px; height: 82px; }
+  .mobile-actions { transform: scale(calc(var(--mobile-btn-scale) * 0.88)); transform-origin: bottom right; }
+  .lobby-card { padding: 12px 14px; }
+  .preview-wrap { height: 220px; }
+  .wardrobe-controls { max-height: 230px; }
 }
 
 body.reduced-motion * { animation: none !important; transition: none !important; }

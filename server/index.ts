@@ -14,12 +14,19 @@ import {
 import { validateLoadout } from '../shared/catalog.js';
 import { IslandTerrainData } from '../shared/terrain.js';
 import { generateTreasureHunt, type TreasureHuntPlan } from '../shared/treasure.js';
+import {
+  decodeInputBinary,
+  encodeCorrectPosBinary,
+  encodeSnapshotBinary,
+  type BinarySnapshotPlayer
+} from '../shared/protocol.js';
 
 const PORT = Number(process.env.PORT || 8080);
 const AOI_RADIUS = 380;
 
 interface ServerPlayer {
   id: string;
+  numId: number;
   token: string;
   ws: WebSocket | null;
   isBot: boolean;
@@ -53,6 +60,7 @@ interface RoomSettings {
 interface RoomState {
   code: string;
   hostId: string;
+  nextNumId: number;
   phase: 'lobby' | 'playing' | 'results';
   settings: RoomSettings;
   players: Map<string, ServerPlayer>;
@@ -89,17 +97,13 @@ function dist3(a: { x: number; y: number; z: number }, b: { x: number; y: number
 }
 
 function send(ws: WebSocket | null, msg: unknown): void {
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify(msg));
-  }
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify(msg));
 }
 
 function broadcast(room: RoomState, msg: unknown): void {
   const raw = JSON.stringify(msg);
   for (const p of room.players.values()) {
-    if (p.ws && p.ws.readyState === 1) {
-      p.ws.send(raw);
-    }
+    if (p.ws && p.ws.readyState === 1) p.ws.send(raw);
   }
 }
 
@@ -111,6 +115,7 @@ function sanitizeRoomLobby(room: RoomState) {
     settings: room.settings,
     players: Array.from(room.players.values()).map((p) => ({
       id: p.id,
+      numId: p.numId,
       name: p.name,
       isBot: p.isBot,
       connected: p.connected,
@@ -134,19 +139,12 @@ function sanitizeSettings(raw: unknown, fallback: RoomSettings): RoomSettings {
       : fallback.timeLimit;
   const seed =
     typeof r.seed === 'number' && Number.isFinite(r.seed) && r.seed > 0
-      ? (Math.floor(r.seed) >>> 0)
+      ? Math.floor(r.seed) >>> 0
       : Math.floor(Math.random() * 899999 + 100000);
-  return {
-    mode,
-    teamMode,
-    timeLimit,
-    seed,
-    fillBots: r.fillBots !== false
-  };
+  return { mode, teamMode, timeLimit, seed, fillBots: r.fillBots !== false };
 }
 
 function startRoomMatch(room: RoomState): void {
-  // Remove previous bots before refilling
   for (const [pid, p] of room.players.entries()) {
     if (p.isBot) room.players.delete(pid);
   }
@@ -161,7 +159,6 @@ function startRoomMatch(room: RoomState): void {
   room.carrierId = null;
   room.digProgress = 0;
 
-  // Optionally fill remaining slots up to MAX_PLAYERS (9) with clearly tagged [BOT] pirates
   if (room.settings.fillBots) {
     const botNames = ['Barnacle [BOT]', 'Cutlass Kate [BOT]', 'Salty Sam [BOT]', 'Calico [BOT]', 'Reef Jack [BOT]', 'Vane [BOT]', 'Morgan [BOT]', 'Sparrow [BOT]'];
     let bi = 0;
@@ -169,6 +166,7 @@ function startRoomMatch(room: RoomState): void {
       const bid = `bot_${bi}_${crypto.randomBytes(2).toString('hex')}`;
       room.players.set(bid, {
         id: bid,
+        numId: room.nextNumId++,
         token: '',
         ws: null,
         isBot: true,
@@ -211,14 +209,8 @@ function startRoomMatch(room: RoomState): void {
     idx++;
   }
 
-  // Only send the FIRST clue initially (never send treasurePos while buried!)
   const firstClue = room.hunt.clues[0];
-  broadcast(room, {
-    type: 'match_started',
-    seed,
-    firstClue,
-    room: sanitizeRoomLobby(room)
-  });
+  broadcast(room, { type: 'match_started', seed, firstClue, room: sanitizeRoomLobby(room) });
 }
 
 function endRoomMatch(room: RoomState, winnerName: string, reason: string): void {
@@ -237,7 +229,6 @@ function endRoomMatch(room: RoomState, winnerName: string, reason: string): void
   });
 }
 
-// High-resolution delta simulation loop (~20 Hz)
 let lastTickMs = performance.now();
 setInterval(() => {
   const nowMs = performance.now();
@@ -246,7 +237,6 @@ setInterval(() => {
   const wallNow = Date.now();
 
   for (const [code, room] of rooms.entries()) {
-    // Cleanup disconnected humans past grace period
     let hasHuman = false;
     for (const [pid, p] of room.players.entries()) {
       if (!p.isBot) {
@@ -260,7 +250,7 @@ setInterval(() => {
           }
           broadcast(room, { type: 'room_update', room: sanitizeRoomLobby(room) });
         } else {
-          hasHuman = true; // still in rejoin grace window
+          hasHuman = true;
         }
       }
     }
@@ -272,7 +262,6 @@ setInterval(() => {
 
     if (room.phase !== 'playing' || !room.terrain || !room.hunt) continue;
 
-    // Timer for competitive / coop
     if (room.settings.mode !== 'explore') {
       room.timeLeft = Math.max(0, room.timeLeft - dt);
       if (room.timeLeft <= 0) {
@@ -281,7 +270,6 @@ setInterval(() => {
       }
     }
 
-    // Step server bots & timers
     const berths = room.terrain.landmarks.filter((l) => l.kind === 'ship_berth');
     for (const p of room.players.values()) {
       if (p.attackCooldown > 0) p.attackCooldown = Math.max(0, p.attackCooldown - dt);
@@ -316,7 +304,7 @@ setInterval(() => {
           p.animState = 'idle';
           if (p.carryingChest) {
             p.score += 1;
-            endRoomMatch(room, p.name, 'Delivered the Treasure Chest to their ship!');
+            endRoomMatch(room, p.name, 'Delivered the buried treasure to their ship!');
             break;
           } else if (p.clueStage < room.hunt.clues.length) {
             p.clueStage++;
@@ -337,17 +325,18 @@ setInterval(() => {
       }
     }
 
-    // AOI-filtered 20 Hz snapshot per human client
+    const carrierNumId = room.carrierId ? (room.players.get(room.carrierId)?.numId ?? -1) : -1;
+
+    // Broadcast AOI-filtered BINARY snapshot frames
     for (const recipient of room.players.values()) {
       if (recipient.isBot || !recipient.ws || recipient.ws.readyState !== 1) continue;
-      const nearbyPlayers = [];
+      const nearby: BinarySnapshotPlayer[] = [];
       for (const other of room.players.values()) {
         if (other.id === recipient.id) continue;
         if (other.id === room.carrierId || dist3(recipient.pos, other.pos) <= AOI_RADIUS) {
-          nearbyPlayers.push({
-            id: other.id,
+          nearby.push({
+            numId: other.numId,
             pos: other.pos,
-            vel: other.vel,
             yaw: other.yaw,
             animState: other.animState,
             carryingChest: other.carryingChest,
@@ -355,27 +344,56 @@ setInterval(() => {
           });
         }
       }
-      send(recipient.ws, {
-        type: 'snapshot',
-        serverTime: wallNow,
-        timeLeft: room.timeLeft,
-        chestState: room.chestState,
-        chestPos: room.chestState === 'buried' ? null : room.chestPos,
-        carrierId: room.carrierId,
-        players: nearbyPlayers
-      });
+      recipient.ws.send(
+        encodeSnapshotBinary(
+          room.timeLeft,
+          room.chestState,
+          room.chestState === 'buried' ? null : room.chestPos,
+          carrierNumId,
+          nearby
+        )
+      );
     }
   }
 }, Math.round(1000 / TICK_RATE_HZ));
 
 const wss = new WebSocketServer({ port: PORT });
-console.log(`[Treasure Isle WS] Authoritative server listening on ws://0.0.0.0:${PORT}`);
+console.log(`[Treasure Island WS] Authoritative server listening on ws://0.0.0.0:${PORT}`);
 
 wss.on('connection', (ws) => {
   let boundRoom: RoomState | null = null;
   let boundPlayer: ServerPlayer | null = null;
 
-  ws.on('message', (raw) => {
+  function applyPlayerMove(pos: { x: number; y: number; z: number }, vel: { x: number; y: number; z: number }, yaw: number, animState: string) {
+    if (!boundRoom || !boundPlayer || boundRoom.phase !== 'playing') return;
+    if (!isFiniteVec3(pos) || !isFiniteVec3(vel)) return;
+    const now = performance.now();
+    const elapsedSec = Math.max(0.02, (now - boundPlayer.lastMoveCheckMs) / 1000);
+    boundPlayer.lastMoveCheckMs = now;
+
+    const maxAllowedDist = MOVE_SPEEDS.sprint * 1.8 * elapsedSec + 2.5;
+    const moveDist = dist3(boundPlayer.pos, pos);
+    const bound = HALF_WORLD + 170;
+    if (moveDist > maxAllowedDist || Math.abs(pos.x) > bound || Math.abs(pos.z) > bound) {
+      if (ws.readyState === 1) ws.send(encodeCorrectPosBinary(boundPlayer.pos));
+      return;
+    }
+
+    boundPlayer.pos = pos;
+    boundPlayer.vel = vel;
+    if (Number.isFinite(yaw)) boundPlayer.yaw = yaw;
+    boundPlayer.animState = animState.slice(0, 20);
+  }
+
+  ws.on('message', (raw, isBinary) => {
+    // Fast binary path for 20 Hz input frames
+    if (isBinary) {
+      const binBuf = Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
+      const parsed = decodeInputBinary(binBuf);
+      if (parsed) applyPlayerMove(parsed.pos, parsed.vel, parsed.yaw, parsed.animState);
+      return;
+    }
+
     let msg: Record<string, any>;
     try {
       msg = JSON.parse(raw.toString());
@@ -391,6 +409,7 @@ wss.on('connection', (ws) => {
 
       const player: ServerPlayer = {
         id: playerId,
+        numId: 1,
         token,
         ws,
         isBot: false,
@@ -424,6 +443,7 @@ wss.on('connection', (ws) => {
       const room: RoomState = {
         code,
         hostId: playerId,
+        nextNumId: 2,
         phase: 'lobby',
         settings: sanitizeSettings(msg.settings, defaultSettings),
         players: new Map([[playerId, player]]),
@@ -490,6 +510,7 @@ wss.on('connection', (ws) => {
       const token = genToken();
       const player: ServerPlayer = {
         id: playerId,
+        numId: room.nextNumId++,
         token,
         ws,
         isBot: false,
@@ -531,25 +552,8 @@ wss.on('connection', (ws) => {
       broadcast(boundRoom, { type: 'room_update', room: sanitizeRoomLobby(boundRoom) });
     } else if (msg.type === 'start_match' && boundRoom.hostId === boundPlayer.id) {
       startRoomMatch(boundRoom);
-    } else if (msg.type === 'input_state' && boundRoom.phase === 'playing') {
-      if (!isFiniteVec3(msg.pos) || !isFiniteVec3(msg.vel)) return;
-      const now = performance.now();
-      const elapsedSec = Math.max(0.02, (now - boundPlayer.lastMoveCheckMs) / 1000);
-      boundPlayer.lastMoveCheckMs = now;
-
-      // Anti-cheat: clamp world bounds & reject extreme speed/teleport deltas
-      const maxAllowedDist = MOVE_SPEEDS.sprint * 1.8 * elapsedSec + 2.5;
-      const moveDist = dist3(boundPlayer.pos, msg.pos);
-      const bound = HALF_WORLD + 170;
-      if (moveDist > maxAllowedDist || Math.abs(msg.pos.x) > bound || Math.abs(msg.pos.z) > bound) {
-        send(ws, { type: 'correct_pos', pos: boundPlayer.pos });
-        return;
-      }
-
-      boundPlayer.pos = msg.pos;
-      boundPlayer.vel = msg.vel;
-      if (typeof msg.yaw === 'number' && Number.isFinite(msg.yaw)) boundPlayer.yaw = msg.yaw;
-      if (typeof msg.animState === 'string') boundPlayer.animState = msg.animState.slice(0, 20);
+    } else if (msg.type === 'input_state') {
+      applyPlayerMove(msg.pos, msg.vel, msg.yaw, String(msg.animState || 'idle'));
     } else if (msg.type === 'claim_clue' && boundRoom.phase === 'playing' && boundRoom.hunt) {
       const stage = boundPlayer.clueStage;
       const clue = boundRoom.hunt.clues[stage];
@@ -593,7 +597,7 @@ wss.on('connection', (ws) => {
           send(ws, { type: 'dig_feedback', message: d < 18 ? 'Warm! Soil feels disturbed nearby...' : 'Only sand and shells here.' });
         }
       }
-    } else if (msg.type === 'attack' && boundRoom.phase === 'playing') {
+    } else if (msg.type === 'attack' && boundRoom.phase === 'playing' && boundRoom.hunt) {
       if (boundPlayer.attackCooldown > 0 || boundPlayer.knockedDownTimer > 0) return;
       boundPlayer.attackCooldown = 0.65;
       const kind = msg.kind === 'shove' ? 'shove' : 'slash';
@@ -607,6 +611,12 @@ wss.on('connection', (ws) => {
           boundRoom.carrierId = null;
           boundRoom.chestPos = { ...target.pos };
           broadcast(boundRoom, { type: 'event', kind: 'chest_dropped', pos: boundRoom.chestPos, thief: boundPlayer.name });
+        }
+        // Steal a clue if target is further ahead in the clue chain!
+        if (target.clueStage > boundPlayer.clueStage && boundPlayer.clueStage < boundRoom.hunt.clues.length) {
+          boundPlayer.clueStage += 1;
+          const nextClue = boundRoom.hunt.clues[boundPlayer.clueStage] || null;
+          send(ws, { type: 'clue_unlocked', clueStage: boundPlayer.clueStage, nextClue, stolenFrom: target.name });
         }
         send(target.ws, { type: 'hit_received', kind, fromPos: boundPlayer.pos });
       }
@@ -624,7 +634,6 @@ wss.on('connection', (ws) => {
       const text = String(msg.text || '').trim().slice(0, 100);
       if (text) broadcast(boundRoom, { type: 'chat', sender: boundPlayer.name, text });
     } else if (msg.type === 'rtc_signal' && msg.targetId) {
-      // Proximity WebRTC signaling relay (only within 48m)
       const target = boundRoom.players.get(String(msg.targetId));
       if (target && !target.isBot && dist3(boundPlayer.pos, target.pos) <= 48) {
         send(target.ws, { type: 'rtc_signal', fromId: boundPlayer.id, signal: msg.signal });

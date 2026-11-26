@@ -1,5 +1,5 @@
 {
-  "name": "treasure-isle",
+  "name": "treasure-island",
   "version": "1.0.0",
   "private": true,
   "type": "module",
@@ -15,10 +15,10 @@
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "@types/node": "^26.6.11",
-    "@types/three": "^0.187.0",
-    "@types/ws": "^8.18.2",
-    "typescript": "^7.0.2",
+    "@types/node": "^22.10.0",
+    "@types/three": "^0.170.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.2",
     "vite": "^6.0.0"
   }
 }

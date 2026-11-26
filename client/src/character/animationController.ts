@@ -225,14 +225,14 @@ export class HumanoidAnimController {
     this.currentState = name;
   }
 
-  public update(dt: number, terrain?: IslandTerrainData, charWorldPos?: THREE.Vector3, charYaw = 0, grounded = true): void {
+  public update(dt: number, terrain?: IslandTerrainData, charWorldPos?: THREE.Vector3, charYaw = 0, grounded = true, enableFootIK = true): void {
     if (this.oneShotTimer > 0) {
       this.oneShotTimer = Math.max(0, this.oneShotTimer - dt);
     }
     this.mixer.update(dt);
 
-    // Slope Foot IK when grounded on terrain
-    if (terrain && charWorldPos && grounded && this.hipsBone && this.thighLBone && this.thighRBone) {
+    // Slope Foot IK (desktop only)
+    if (enableFootIK && terrain && charWorldPos && grounded && this.hipsBone && this.thighLBone && this.thighRBone) {
       const cos = Math.cos(charYaw);
       const sin = Math.sin(charYaw);
       const footOffset = 0.14;

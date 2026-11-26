@@ -30,6 +30,7 @@ export class HumanoidCharacter {
   public loadout: ClothingLoadout;
   public wetness = 0;
   public mud = 0;
+  public wetnessEnabled = true;
 
   constructor(baseGltf: GLTF, clothingGltf: GLTF, loadout: ClothingLoadout = DEFAULT_LOADOUT) {
     this.clothingSource = clothingGltf;
@@ -182,6 +183,11 @@ export class HumanoidCharacter {
   }
 
   public updateEnvironmentSurface(dt: number, inWater: boolean, raining: boolean, inMud: boolean): void {
+    if (!this.wetnessEnabled) {
+      this.wetnessUniforms.uWetness.value = 0;
+      this.wetnessUniforms.uMud.value = 0;
+      return;
+    }
     if (inWater || raining) {
       this.wetness = Math.min(1, this.wetness + dt * (inWater ? 1.8 : 0.25));
     } else {

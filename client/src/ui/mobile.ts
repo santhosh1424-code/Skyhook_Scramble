@@ -1,4 +1,4 @@
-// Upgraded multi-touch mobile controls (reusing & fixing SKY src/mobile.js)
+// Landscape-only mobile touch controls (reusing & fixing SKY src/mobile.js)
 
 export function detectTouchDevice(): boolean {
   return (
@@ -12,6 +12,7 @@ export interface MobileControlCallbacks {
   onJump: () => void;
   onDig: () => void;
   onAttack: () => void;
+  onShove: () => void;
   onSprintToggle: (sprinting: boolean) => void;
   onMap: () => void;
   onWardrobe: () => void;
@@ -29,6 +30,7 @@ export class MobileControls {
   private readonly btnJump = document.getElementById('m-btn-jump');
   private readonly btnDig = document.getElementById('m-btn-dig');
   private readonly btnAttack = document.getElementById('m-btn-attack');
+  private readonly btnShove = document.getElementById('m-btn-shove');
   private readonly btnSprint = document.getElementById('m-btn-sprint');
   private readonly btnMap = document.getElementById('m-btn-map');
   private readonly btnWardrobe = document.getElementById('m-btn-wardrobe');
@@ -36,6 +38,7 @@ export class MobileControls {
 
   public enabled = detectTouchDevice();
   public joystickSize: 'small' | 'medium' | 'large' = 'medium';
+  public buttonSize: 'small' | 'medium' | 'large' = 'medium';
   public buttonOpacity = 0.85;
   public moveX = 0;
   public moveY = 0;
@@ -55,10 +58,28 @@ export class MobileControls {
     this.applySettings();
   }
 
+  public async requestLandscapeFullscreen(): Promise<void> {
+    try {
+      if (!document.fullscreenElement && document.documentElement.requestFullscreen) {
+        await document.documentElement.requestFullscreen();
+      }
+      const orient = screen.orientation as unknown as { lock?: (mode: string) => Promise<void> };
+      await orient?.lock?.('landscape');
+    } catch {
+      // Unsupported on iOS Safari — portrait overlay handles orientation prompt gracefully
+    }
+  }
+
   public getSizePx(): number {
     if (this.joystickSize === 'small') return 96;
     if (this.joystickSize === 'large') return 148;
     return 120;
+  }
+
+  public getButtonScale(): number {
+    if (this.buttonSize === 'small') return 0.88; // keeps >= 48px
+    if (this.buttonSize === 'large') return 1.14;
+    return 1.0;
   }
 
   public applySettings(): void {
@@ -68,7 +89,10 @@ export class MobileControls {
       this.joystickBase.style.width = `${px}px`;
       this.joystickBase.style.height = `${px}px`;
     }
-    this.root?.style.setProperty('--mobile-btn-opacity', String(this.buttonOpacity));
+    if (this.root) {
+      this.root.style.setProperty('--mobile-btn-opacity', String(this.buttonOpacity));
+      this.root.style.setProperty('--mobile-btn-scale', String(this.getButtonScale()));
+    }
   }
 
   public setActive(active: boolean): void {
@@ -88,15 +112,12 @@ export class MobileControls {
     }
   }
 
-  /** Fixed from SKY mobile.js: clears inline anchor offsets so joystick returns cleanly to CSS safe-area */
   public resetInputs(): void {
     this.joyTouchId = null;
     this.camTouchId = null;
     this.moveX = 0;
     this.moveY = 0;
-    if (this.joystickKnob) {
-      this.joystickKnob.style.transform = 'translate(-50%, -50%)';
-    }
+    if (this.joystickKnob) this.joystickKnob.style.transform = 'translate(-50%, -50%)';
     if (this.joystickBase) {
       this.joystickBase.style.left = '';
       this.joystickBase.style.top = '';
@@ -221,6 +242,7 @@ export class MobileControls {
     bindBtn(this.btnJump, this.cb.onJump);
     bindBtn(this.btnDig, this.cb.onDig);
     bindBtn(this.btnAttack, this.cb.onAttack);
+    bindBtn(this.btnShove, this.cb.onShove);
     bindBtn(this.btnMap, this.cb.onMap);
     bindBtn(this.btnWardrobe, this.cb.onWardrobe);
     bindBtn(this.btnEmote, this.cb.onEmote);

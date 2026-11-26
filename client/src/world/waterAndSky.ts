@@ -28,6 +28,8 @@ export class WaterAndSkySystem {
   private readonly underwaterOverlay: THREE.Mesh;
   private readonly rainPoints: THREE.Points;
   private readonly rainPos: Float32Array;
+  private readonly skyClouds: THREE.Group[] = [];
+  private readonly shipWakeRings: THREE.Mesh[] = [];
   private stormTimer = 75;
   private readonly fogColor = new THREE.Color(0x9bd7f2);
 
@@ -226,6 +228,37 @@ export class WaterAndSkySystem {
     );
     this.rainPoints.visible = false;
     this.scene.add(this.rainPoints);
+
+    // Drifting sky clouds
+    const cloudMat = new THREE.MeshStandardMaterial({ color: 0xfafcff, roughness: 0.95, transparent: true, opacity: 0.88 });
+    for (let i = 0; i < 18; i++) {
+      const cg = new THREE.Group();
+      for (let p = 0; p < 3; p++) {
+        const puff = new THREE.Mesh(new THREE.IcosahedronGeometry(18 + p * 5, 1), cloudMat);
+        puff.scale.set(1.6, 0.55, 1.1);
+        puff.position.set((p - 1) * 18, (p % 2) * 3, (p % 2) * 4);
+        cg.add(puff);
+      }
+      const a = (i / 18) * Math.PI * 2;
+      const dist = 600 + (i % 4) * 260;
+      cg.position.set(Math.cos(a) * dist, 195 + (i % 3) * 28, Math.sin(a) * dist);
+      cg.userData = { a, dist, spd: 0.008 + (i % 3) * 0.004 };
+      this.group.add(cg);
+      this.skyClouds.push(cg);
+    }
+  }
+
+  public setShipWakePositions(positions: { x: number; z: number }[]): void {
+    this.shipWakeRings.forEach((r) => this.group.remove(r));
+    this.shipWakeRings.length = 0;
+    const wakeMat = new THREE.MeshBasicMaterial({ color: 0xdff8ff, transparent: true, opacity: 0.36, side: THREE.DoubleSide, depthWrite: false });
+    for (const p of positions) {
+      const ring = new THREE.Mesh(new THREE.RingGeometry(4.5, 6.2, 24), wakeMat);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(p.x, WATER_LEVEL + 0.14, p.z);
+      this.group.add(ring);
+      this.shipWakeRings.push(ring);
+    }
   }
 
   public update(dt: number, elapsed: number, focusPos: THREE.Vector3, camera: THREE.Camera, drawDistance: number): void {
@@ -311,6 +344,18 @@ export class WaterAndSkySystem {
     this.waterMat.uniforms.uSkyColor.value.copy(horizCol);
     this.waterMat.uniforms.uFogColor.value.copy(this.fogColor);
     this.waterMat.uniforms.uFogDensity.value = fog.density;
+
+    // Drift sky clouds & pulse ship wake foam rings
+    for (const cg of this.skyClouds) {
+      cg.userData.a += dt * cg.userData.spd * this.weather.windStrength;
+      cg.position.x = Math.cos(cg.userData.a) * cg.userData.dist;
+      cg.position.z = Math.sin(cg.userData.a) * cg.userData.dist;
+    }
+    for (let i = 0; i < this.shipWakeRings.length; i++) {
+      const r = this.shipWakeRings[i];
+      const wave = 1 + ((elapsed * 0.45 + i * 0.2) % 1) * 0.55;
+      r.scale.setScalar(wave);
+    }
 
     // Rain update around player/camera
     if (this.weather.stormIntensity > 0.15) {

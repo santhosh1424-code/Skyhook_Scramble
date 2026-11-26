@@ -1,9 +1,16 @@
-// Authoritative WebSocket client with ~100ms remote interpolation buffer & rejoin token persistence
+// Binary + JSON WebSocket client with ~100ms remote interpolation buffer & rejoin token
+import {
+  decodeCorrectPosBinary,
+  decodeSnapshotBinary,
+  encodeInputBinary,
+  PKT_CORRECT_POS,
+  PKT_SNAPSHOT
+} from '@shared/protocol';
 
 export interface RemoteSnapshotPlayer {
   id: string;
+  numId: number;
   pos: { x: number; y: number; z: number };
-  vel: { x: number; y: number; z: number };
   yaw: number;
   animState: string;
   carryingChest: boolean;
@@ -24,6 +31,7 @@ export class TreasureNetClient {
 
   private readonly handlers = new Map<string, (payload: any) => void>();
   private readonly snapshotBuffer: BufferedFrame[] = [];
+  private readonly numIdToId = new Map<number, string>();
   private readonly INTERP_DELAY_MS = 100;
 
   public on(event: string, fn: (payload: any) => void): void {
@@ -32,6 +40,13 @@ export class TreasureNetClient {
 
   private emit(event: string, payload: any): void {
     this.handlers.get(event)?.(payload);
+  }
+
+  private indexRoomPlayers(room: any): void {
+    this.numIdToId.clear();
+    for (const p of room?.players || []) {
+      if (typeof p.numId === 'number') this.numIdToId.set(p.numId, p.id);
+    }
   }
 
   public connect(wsUrl: string): Promise<void> {
@@ -43,6 +58,7 @@ export class TreasureNetClient {
       let settled = false;
       try {
         this.ws = new WebSocket(wsUrl);
+        this.ws.binaryType = 'arraybuffer';
       } catch (err) {
         this.status = 'error';
         this.emit('status', this.status);
@@ -56,7 +72,7 @@ export class TreasureNetClient {
           this.status = 'error';
           this.emit('status', this.status);
           this.ws?.close();
-          reject(new Error('Connection timed out. Is the Treasure Isle server running?'));
+          reject(new Error('Connection timed out. Is the Treasure Island server running?'));
         }
       }, 4500);
 
@@ -87,6 +103,32 @@ export class TreasureNetClient {
       };
 
       this.ws.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) {
+          const op = new Uint8Array(ev.data)[0];
+          if (op === PKT_SNAPSHOT) {
+            const snap = decodeSnapshotBinary(ev.data);
+            if (!snap) return;
+            const map = new Map<string, RemoteSnapshotPlayer>();
+            for (const p of snap.players) {
+              const id = this.numIdToId.get(p.numId);
+              if (!id) continue;
+              map.set(id, { ...p, id });
+            }
+            this.snapshotBuffer.push({ time: performance.now(), players: map });
+            while (this.snapshotBuffer.length > 15) this.snapshotBuffer.shift();
+            this.emit('snapshot', {
+              timeLeft: snap.timeLeft,
+              chestState: snap.chestState,
+              chestPos: snap.chestPos,
+              carrierId: snap.carrierNumId >= 0 ? this.numIdToId.get(snap.carrierNumId) || null : null
+            });
+          } else if (op === PKT_CORRECT_POS) {
+            const pos = decodeCorrectPosBinary(ev.data);
+            if (pos) this.emit('correct_pos', { pos });
+          }
+          return;
+        }
+
         let msg: any;
         try {
           msg = JSON.parse(ev.data);
@@ -97,26 +139,35 @@ export class TreasureNetClient {
           this.playerId = msg.playerId;
           this.token = msg.token;
           this.room = msg.room;
+          this.indexRoomPlayers(msg.room);
           try {
             sessionStorage.setItem(
-              'treasure_isle_session',
+              'treasure_island_session',
               JSON.stringify({ roomCode: msg.room.code, token: msg.token })
             );
           } catch {}
-        } else if (msg.type === 'room_update') {
-          this.room = msg.room;
-        } else if (msg.type === 'snapshot') {
-          const map = new Map<string, RemoteSnapshotPlayer>();
-          for (const p of msg.players || []) map.set(p.id, p);
-          this.snapshotBuffer.push({ time: performance.now(), players: map });
-          while (this.snapshotBuffer.length > 15) this.snapshotBuffer.shift();
+        } else if (msg.type === 'room_update' || msg.type === 'match_started') {
+          if (msg.room) {
+            this.room = msg.room;
+            this.indexRoomPlayers(msg.room);
+          }
         }
         this.emit(msg.type, msg);
       };
     });
   }
 
-  /** ~100ms entity interpolation for smooth remote pirate motion */
+  public sendInputBinary(
+    pos: { x: number; y: number; z: number },
+    vel: { x: number; y: number; z: number },
+    yaw: number,
+    animState: string
+  ): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(encodeInputBinary(pos, vel, yaw, animState));
+    }
+  }
+
   public getInterpolatedPlayer(id: string): RemoteSnapshotPlayer | null {
     if (this.snapshotBuffer.length === 0) return null;
     const renderTime = performance.now() - this.INTERP_DELAY_MS;
@@ -130,9 +181,7 @@ export class TreasureNetClient {
         break;
       }
     }
-    if (!older) {
-      return this.snapshotBuffer[0].players.get(id) || null;
-    }
+    if (!older) return this.snapshotBuffer[0].players.get(id) || null;
 
     const p0 = older.players.get(id);
     const p1 = newer?.players.get(id);
