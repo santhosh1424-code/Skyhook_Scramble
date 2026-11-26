@@ -1,50 +1,73 @@
-# Skyhook Scramble
+# Treasure Isle
 
-A fast, colorful 3D pirate party game for **8–9 friends**, built with **Three.js + Vite** and an authoritative **Node.js WebSocket (`ws`)** server.
+A browser-based 3D open-world multiplayer pirate treasure-hunt game for up to **9 players**, built with **Three.js + Vite + TypeScript** and an authoritative **Node.js WebSocket (`ws`)** server.
 
-## Quick Start (Local Play)
+## Quick Start (Local Development)
 
-### 1. Offline Bot Match (Zero Server Needed)
+### 1. Install & Generate Assets
 ```bash
 npm install
+npm run gen:assets
+```
+
+### 2. Offline / Bot Expedition (Single Terminal)
+```bash
 npm run dev
 ```
-Open the printed `localhost` URL in your browser and click **Set Sail! (Offline Bot Match)**.
+Open `http://localhost:5173` and click **Set Sail! (Offline Expedition)**.
 
-### 2. Local Online Multiplayer (Testing / LAN)
-Start the WebSocket server in one terminal:
+### 3. Online Multiplayer (Two Terminals)
+Terminal 1 — start the authoritative WebSocket server (port `8080`):
 ```bash
 npm run server
 ```
-Start the Vite frontend in a second terminal:
+Terminal 2 — start the Vite frontend:
 ```bash
 npm run dev
 ```
-In the game lobby, switch to the **Online Private Room** tab, keep `ws://localhost:8080`, click **Create Room**, and share the 6-character invite code with friends!
+Switch to the **Online Private Room** tab, create a room, and share the 6-character invite code with up to 9 friends.
 
 ---
 
-## Deploying to Vercel + WebSocket Server
+## Opening on a Phone or Tablet
+1. **Via Deployed HTTPS URL:** Open your Vercel/Netlify link in iOS Safari or Android Chrome.
+2. **Via Local Wi-Fi Dev Server:** Run `npx vite --host` in the project folder and open the printed `http://<your-PC-LAN-IP>:5173` URL on your phone.
 
-Because Vercel serves static frontends (and serverless functions do not maintain persistent WebSocket game loops), deploy the two parts as follows:
+Touch devices automatically enable the left virtual joystick, right-side camera drag, and action buttons (**JUMP**, **DIG / E**, **SLASH**, **SPRINT**, **MAP**, **WARDROBE**, **EMOTE**). Adjust joystick size, button opacity, sensitivity, and graphics quality in **⚙ Quality & Accessibility**.
 
-1. **Frontend on Vercel:**
-   - Connect this repository to Vercel (reads [vercel.json](file:///d:/SKY/vercel.json), runs `npm run build`, outputs `dist/`).
-   - Set environment variable `VITE_WS_URL` in Vercel Project Settings to your hosted WebSocket server URL (e.g. `wss://your-skyhook-server.onrender.com`), **or** players can paste the `wss://` URL directly in the **Online Private Room** tab.
-   - Even without a backend connected, the Vercel deployment remains immediately playable in **Offline Bot Match** mode.
+---
 
-2. **WebSocket Server (`server/index.js`) on Render / Railway / Fly.io / VPS:**
-   - Start command: `npm run server` (reads `process.env.PORT`, defaults to `8080`).
-   - Install dependencies (`npm install`) and expose the WebSocket port over TLS (`wss://`).
+## Production Build & Deployment
+
+### Build Everything Locally
+```bash
+npm run build
+```
+This runs TypeScript type-checking (`tsc --noEmit`), builds the static client bundle into `dist/`, and compiles the WebSocket server into `dist-server/`.
+
+### Deploy Frontend (Vercel or Netlify)
+- **Vercel:** Connect the GitHub repository; `vercel.json` runs `tsc --noEmit && vite build` and deploys `dist/`.
+- **Netlify:** Build command `npm run build`, publish directory `dist`.
+- Set environment variable `VITE_WS_URL` to your deployed `wss://` server URL (or players can paste the `wss://` URL directly in the **Online Private Room** tab).
+
+### Deploy Server (Render / Railway / Fly.io / Docker)
+Use the included `Dockerfile` or run directly:
+- **Docker:**
+  ```bash
+  docker build -t treasure-isle-server .
+  docker run -p 8080:8080 treasure-isle-server
+  ```
+- **Render / Railway / Fly.io:** Build command `npm ci && npx tsc -p tsconfig.server.json`, Start command `node dist-server/server/index.js`, expose port `8080` (`process.env.PORT`).
 
 ---
 
 ## Controls
-- **Move:** `WASD` (or Gamepad Left Stick)
-- **Jump / Ledge-Climb:** `Space` (Gamepad `A` / `Cross`)
-- **Skyhook Grapple:** `Right Click` or `E` when the green reticle (`◎`) highlights a buoy or mast (Gamepad `LB` / `LT`)
-- **Dash / Steal Core:** `Shift` or `Left Click` (when camera locked) (Gamepad `B` / `Circle`)
-- **Gadget:** `Q` or `F` (Gamepad `X` / `Square`)
-- **Emote:** `G` (Gamepad `Y` / `Triangle`)
-- **Reset to Airship:** `R`
-- **Lock Mouse Camera:** Click anywhere on the game canvas (`Esc` to unlock)
+- **Move:** `WASD` (or Left Touch Joystick / Gamepad Left Stick)
+- **Sprint:** `Shift` (or Mobile `SPRINT` toggle)
+- **Jump / Ledge Climb:** `Space` (Gamepad `A`)
+- **Dig / Inspect Clue:** `E` (Gamepad `X`)
+- **Cutlass Swing / Shove:** `F` or Left Click / `X` (Gamepad `B`)
+- **1st / 3rd Person Camera:** `V`
+- **Map & Clue Journal:** `M`
+- **Wardrobe (Near Ship Dock or Camp Chest):** `C`
+- **Chat / Emote:** `T` or `Enter` / `G`

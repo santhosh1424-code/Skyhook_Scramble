@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Treasure Isle — Open-World Pirate Multiplayer</title>
+  <link rel="stylesheet" href="/src/styles.css" />
+</head>
+<body>
+  <canvas id="game-canvas"></canvas>
+
+  <!-- LOADING SCREEN -->
+  <div id="loading-screen" class="loading-screen">
+    <div class="loading-box">
+      <h1>TREASURE ISLE</h1>
+      <p id="loading-status">Charting island terrain &amp; rigging pirate crew...</p>
+      <div class="progress-track"><div id="loading-bar" class="progress-fill"></div></div>
+    </div>
+  </div>
+
+  <!-- WEBGL UNSUPPORTED FALLBACK -->
+  <div id="webgl-fallback" class="loading-screen hidden">
+    <div class="loading-box">
+      <h1>WebGL Unavailable</h1>
+      <p>Treasure Isle requires hardware-accelerated WebGL to render the 2 km × 2 km tropical island. Enable WebGL or update your browser graphics drivers.</p>
+    </div>
+  </div>
+
+  <!-- CINEMATIC MENU / LOBBY OVERLAY -->
+  <div id="lobby-screen" class="overlay-screen hidden">
+    <div class="lobby-card">
+      <div class="title-banner">
+        <div class="badge-pill">2 KM × 2 KM OPEN WORLD • UP TO 9 PIRATES</div>
+        <h1>TREASURE ISLE</h1>
+        <p class="subtitle-tagline">Follow the clues, dig up the buried chest, and bring it back to your ship!</p>
+      </div>
+
+      <div class="lobby-grid">
+        <!-- Left Column: Match & Online Private Room -->
+        <section class="panel">
+          <div class="tab-bar">
+            <button id="tab-offline" class="tab-btn active" type="button">Offline / Bot Expedition</button>
+            <button id="tab-online" class="tab-btn" type="button">Online Private Room</button>
+          </div>
+
+          <div class="form-row split">
+            <div>
+              <label for="player-name">Pirate Name</label>
+              <input id="player-name" type="text" maxlength="16" value="Cap'n Hawthorne" />
+            </div>
+            <div>
+              <label for="island-seed">Island Seed</label>
+              <input id="island-seed" type="text" maxlength="10" value="424242" />
+            </div>
+          </div>
+
+          <div class="form-row split">
+            <div>
+              <label for="game-mode">Expedition Mode</label>
+              <select id="game-mode">
+                <option value="competitive" selected>Competitive Hunt</option>
+                <option value="coop">Co-op vs Timer</option>
+                <option value="explore">Free Explore (No Timer)</option>
+              </select>
+            </div>
+            <div>
+              <label for="team-mode">Alliance</label>
+              <select id="team-mode">
+                <option value="solo" selected>Solo Pirates (Free-for-All)</option>
+                <option value="teams">Crews (3 Teams)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="form-row split">
+            <div>
+              <label for="time-limit">Time Limit</label>
+              <select id="time-limit">
+                <option value="900" selected>15:00 (Standard)</option>
+                <option value="600">10:00 (Brisk)</option>
+                <option value="1200">20:00 (Long)</option>
+              </select>
+            </div>
+            <div>
+              <label for="bot-fill">Fill Empty Slots</label>
+              <select id="bot-fill">
+                <option value="yes" selected>Yes — Up to 9 [BOT] Rivals</option>
+                <option value="no">Humans Only (Solo / Online)</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Online Room Controls -->
+          <div id="online-panel" class="room-box hidden">
+            <div class="room-header">
+              <span>Multiplayer WebSocket Server</span>
+              <span id="ws-status-badge" class="status-tag">NOT CONNECTED</span>
+            </div>
+            <div class="form-row">
+              <input id="ws-url-input" type="text" placeholder="ws://localhost:8080" />
+            </div>
+            <div class="room-code-row">
+              <button id="btn-create-room" class="btn-small" type="button">Create Room</button>
+              <input id="join-code-input" type="text" maxlength="8" placeholder="Code (6 chars)" style="max-width:130px;" />
+              <button id="btn-join-room" class="btn-small" type="button">Join</button>
+              <button id="btn-rejoin-saved" class="btn-small hidden" type="button">Rejoin</button>
+            </div>
+            <div id="online-roster-box" class="roster-box hidden">
+              <div class="room-header">
+                <span>Invite Code: <strong id="active-room-code">------</strong></span>
+                <button id="btn-copy-code" class="btn-small" type="button">Copy</button>
+              </div>
+              <div id="roster-list" class="roster-list"></div>
+              <button id="btn-online-start" class="btn-primary hidden" type="button" style="margin-top:8px;">Launch Expedition</button>
+            </div>
+            <p id="online-helper-text" class="helper-text">
+              Start <code>npm run server</code> locally or deploy the Docker server and paste its <code>wss://</code> URL above.
+            </p>
+          </div>
+
+          <div class="lobby-actions">
+            <button id="btn-start-offline" class="btn-primary" type="button">Set Sail! (Offline Expedition)</button>
+            <div class="secondary-actions">
+              <button id="btn-open-tutorial" class="btn-secondary" type="button">Controls &amp; Guide</button>
+              <button id="btn-open-settings" class="btn-secondary" type="button">Quality &amp; Accessibility</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Right Column: Live 3D Character & Clothing Customization -->
+        <section class="panel customization-panel">
+          <h2>Character &amp; Wardrobe</h2>
+          <div class="customizer-split">
+            <div class="preview-wrap">
+              <canvas id="lobby-preview-canvas"></canvas>
+              <div class="preview-hint">Drag to rotate pirate</div>
+            </div>
+            <div id="lobby-wardrobe-controls" class="wardrobe-controls"></div>
+          </div>
+        </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- IN-GAME HUD -->
+  <div id="hud" class="hidden">
+    <!-- Top Bar: Scoreboard + Compass + Timer + Actions -->
+    <div class="hud-top">
+      <div class="hud-top-left">
+        <div id="scoreboard" class="scoreboard"></div>
+        <!-- Clue Journal & Objective Tracker -->
+        <div id="clue-panel" class="clue-panel">
+          <div class="clue-header">
+            <span id="objective-title">Clue 1/4: Torn Map Scrap</span>
+            <button id="btn-toggle-journal" class="mini-btn" type="button">📖</button>
+          </div>
+          <div id="objective-riddle" class="clue-riddle">Seek the first torn chart inside the landmark.</div>
+          <div id="wardrobe-nearby-pill" class="wardrobe-nearby hidden">👕 Press [C] for Wardrobe</div>
+        </div>
+      </div>
+
+      <div class="compass-stack">
+        <div class="compass-bar">
+          <span id="compass-heading">N</span>
+          <div class="compass-track">
+            <div id="compass-clue-pip" class="compass-clue-pip" title="Direction to Next Clue / Ship">◆</div>
+          </div>
+          <span id="compass-dist">--m</span>
+        </div>
+        <div class="timer-pill">
+          <span id="round-timer">15:00</span>
+          <span id="mode-pill" class="mode-sub">COMPETITIVE</span>
+        </div>
+      </div>
+
+      <div class="hud-top-right">
+        <button id="btn-hud-map" class="icon-btn" title="Full Map [M]">🗺</button>
+        <button id="btn-hud-wardrobe" class="icon-btn" title="Wardrobe [C] (Near Ship/Camp)">👕</button>
+        <button id="btn-hud-chat" class="icon-btn mobile-only" title="Toggle Chat">💬</button>
+        <button id="btn-hud-settings" class="icon-btn" title="Settings & Quality">⚙</button>
+        <button id="btn-hud-leave" class="icon-btn warn" title="Leave Expedition">🚪</button>
+      </div>
+    </div>
+
+    <!-- Portrait Rotate Prompt (Touch Only) -->
+    <div id="rotate-prompt" class="rotate-prompt hidden">
+      <span>📱 Rotate to landscape for the widest view!</span>
+      <button id="btn-dismiss-rotate" class="btn-small" type="button">OK</button>
+    </div>
+
+    <!-- Minimap (Top-Right below Buttons) -->
+    <div id="minimap-wrap" class="minimap-wrap">
+      <canvas id="minimap-canvas" width="150" height="150"></canvas>
+      <div class="minimap-label">MAP [M]</div>
+    </div>
+
+    <!-- Banner Alert -->
+    <div id="banner-alert" class="banner-alert hidden">
+      <span id="banner-icon">🏴‍☠️</span>
+      <div>
+        <div id="banner-title">CLUE UNLOCKED</div>
+        <div id="banner-desc">Follow your compass!</div>
+      </div>
+    </div>
+
+    <!-- Crosshair & Interaction Prompt -->
+    <div id="crosshair">
+      <div class="crosshair-dot"></div>
+      <div id="interact-prompt" class="interact-prompt hidden">[E] Dig / Inspect Clue</div>
+    </div>
+
+    <!-- Chat & Voice Bar (Bottom-Left) -->
+    <div id="hud-chat-wrap" class="hud-bottom-left">
+      <div class="voice-bar">
+        <button id="btn-voice-toggle" class="mini-btn" type="button">🎙 Voice: Off</button>
+        <button id="btn-sfx-toggle" class="mini-btn" type="button">🔊 Audio: On</button>
+        <button id="btn-cam-toggle" class="mini-btn desktop-only" type="button">👁 View [V]</button>
+        <button id="btn-emote-cycle" class="mini-btn desktop-only" type="button">💃 Emote [G]</button>
+      </div>
+      <div id="chat-log" class="chat-log"></div>
+      <form id="chat-form" class="chat-form">
+        <input id="chat-input" type="text" maxlength="100" placeholder="Press T or Enter to chat..." />
+      </form>
+    </div>
+
+    <!-- Subtitles -->
+    <div id="subtitle-box" class="subtitle-box hidden"></div>
+
+    <!-- Inventory & Desktop Controls Strip (Bottom-Right) -->
+    <div class="hud-bottom-right desktop-only">
+      <div id="inventory-bar" class="inventory-bar">
+        <div class="inv-slot active">🪏 Shovel [E]</div>
+        <div class="inv-slot">⚔️ Cutlass [F]</div>
+        <div class="inv-slot">🧭 Compass</div>
+        <div id="inv-chest" class="inv-slot hidden chest-glow">💰 Carrying Chest!</div>
+      </div>
+      <div class="controls-mini">
+        WASD Move • Shift Sprint • Space Jump • E Dig/Clue • F Cutlass • X Shove • V 1st/3rd Cam • M Map • C Wardrobe • T Chat
+      </div>
+    </div>
+
+    <!-- MOBILE TOUCH CONTROLS (Only shown on touch screens while playing) -->
+    <div id="mobile-controls" class="mobile-controls hidden">
+      <div id="mobile-joystick-zone" class="mobile-joystick-zone">
+        <div id="joystick-base" class="joystick-base">
+          <div id="joystick-knob" class="joystick-knob"></div>
+        </div>
+      </div>
+      <div id="mobile-cam-zone" class="mobile-cam-zone">
+        <div class="mobile-actions">
+          <button id="m-btn-emote" class="m-btn m-btn-small" type="button" aria-label="Emote">💃</button>
+          <button id="m-btn-map" class="m-btn m-btn-small m-map" type="button" aria-label="Map">🗺</button>
+          <button id="m-btn-wardrobe" class="m-btn m-btn-small m-wardrobe" type="button" aria-label="Wardrobe">👕</button>
+          <button id="m-btn-sprint" class="m-btn m-btn-med m-sprint" type="button" aria-label="Sprint">
+            <span class="m-icon">🏃</span><span class="m-label">SPRINT</span>
+          </button>
+          <button id="m-btn-attack" class="m-btn m-btn-med m-attack" type="button" aria-label="Cutlass">
+            <span class="m-icon">⚔️</span><span class="m-label">SLASH</span>
+          </button>
+          <button id="m-btn-dig" class="m-btn m-btn-med m-dig" type="button" aria-label="Dig or Interact">
+            <span class="m-icon">🪏</span><span class="m-label">DIG / E</span>
+          </button>
+          <button id="m-btn-jump" class="m-btn m-btn-large m-jump" type="button" aria-label="Jump">
+            <span class="m-icon">⬆</span><span class="m-label">JUMP</span>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FULL MAP & CLUE JOURNAL MODAL -->
+  <div id="map-modal" class="modal hidden">
+    <div class="modal-card map-modal-card">
+      <div class="modal-header-row">
+        <h2>Island Chart &amp; Clue Journal</h2>
+        <button id="btn-close-map" class="btn-small" type="button">Close [M]</button>
+      </div>
+      <div class="map-modal-grid">
+        <canvas id="full-map-canvas" width="460" height="460"></canvas>
+        <div class="journal-col">
+          <h3>Discovered Clues</h3>
+          <div id="journal-list" class="journal-list"></div>
+          <p class="helper-text">Legend: White Arrow = You • Blue Dot = Your Ship Berth • Gold Dot = Current Clue. The buried treasure is never marked on the map!</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IN-GAME WARDROBE MODAL -->
+  <div id="wardrobe-modal" class="modal hidden">
+    <div class="modal-card wardrobe-modal-card">
+      <div class="modal-header-row">
+        <h2>Ship &amp; Camp Wardrobe</h2>
+        <button id="btn-close-wardrobe" class="btn-small" type="button">Done [C]</button>
+      </div>
+      <div class="customizer-split">
+        <div class="preview-wrap">
+          <canvas id="ingame-preview-canvas"></canvas>
+          <div class="preview-hint">Drag to rotate</div>
+        </div>
+        <div id="ingame-wardrobe-controls" class="wardrobe-controls"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TUTORIAL MODAL -->
+  <div id="tutorial-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Explorer’s Guide — Treasure Isle</h2>
+      <div class="tutorial-steps">
+        <div class="t-step"><strong>1. Follow the Clues:</strong> Your compass at the top points toward your current clue (caves, ruins, shipwrecks, camps). Press <code>E</code> (or <code>DIG/E</code>) near a clue scroll or carved X stone to unlock the next riddle.</div>
+        <div class="t-step"><strong>2. Dig Up the Chest:</strong> Once near the carved X rock, use your Shovel (<code>E</code>) to dig! Watch for warm/cold soil feedback. Unearthing the chest takes two digs.</div>
+        <div class="t-step"><strong>3. Fight &amp; Deliver:</strong> Carrying the heavy chest slows you down. Swing your Cutlass (<code>F</code> / Click) or Shove (<code>X</code>) to knock rivals down and steal the chest, then carry it back to your Ship Berth!</div>
+        <div class="t-step"><strong>4. Customize Anytime:</strong> Open your Wardrobe (<code>C</code>) when standing next to your ship dock or any camp chest!</div>
+      </div>
+      <div class="modal-footer">
+        <button id="btn-close-tutorial" class="btn-primary" type="button">Aye, Captain!</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SETTINGS & ACCESSIBILITY MODAL -->
+  <div id="settings-modal" class="modal hidden">
+    <div class="modal-card">
+      <h2>Quality, Controls &amp; Accessibility</h2>
+      <div class="settings-grid">
+        <div class="form-row split">
+          <div>
+            <label for="opt-quality">Graphics Preset</label>
+            <select id="opt-quality">
+              <option value="low">Low (Mobile / Fast)</option>
+              <option value="medium" selected>Medium (Balanced)</option>
+              <option value="high">High (Crisp + Bloom)</option>
+              <option value="ultra">Ultra (SSAO + Max Foliage)</option>
+            </select>
+          </div>
+          <div>
+            <label for="opt-sensitivity">Camera Sensitivity: <span id="sens-val">1.0x</span></label>
+            <input type="range" id="opt-sensitivity" min="0.4" max="2.4" step="0.1" value="1.0" />
+          </div>
+        </div>
+        <div class="form-row split">
+          <div>
+            <label for="opt-joystick-size">Mobile Joystick Size</label>
+            <select id="opt-joystick-size">
+              <option value="small">Small</option>
+              <option value="medium" selected>Medium</option>
+              <option value="large">Large</option>
+            </select>
+          </div>
+          <div>
+            <label for="opt-btn-opacity">Touch Opacity: <span id="opacity-val">85%</span></label>
+            <input type="range" id="opt-btn-opacity" min="0.35" max="1" step="0.05" value="0.85" />
+          </div>
+        </div>
+        <label class="toggle-row"><input type="checkbox" id="opt-subtitles" checked /><span>Subtitles for Audio Cues</span></label>
+        <label class="toggle-row"><input type="checkbox" id="opt-colorblind" /><span>Colorblind-Friendly Markers &amp; Shapes</span></label>
+        <label class="toggle-row"><input type="checkbox" id="opt-reduced-motion" /><span>Reduced Motion (Calm Camera &amp; UI)</span></label>
+        <label class="toggle-row"><input type="checkbox" id="opt-music" checked /><span>Sea Shanty Background Music</span></label>
+        <div class="form-row">
+          <label for="opt-volume">Audio Volume: <span id="vol-val">70%</span></label>
+          <input type="range" id="opt-volume" min="0" max="1" step="0.05" value="0.7" />
+        </div>
+      </div>
+
+      <h3>Keybindings (Click to rebind)</h3>
+      <div id="keybind-list" class="keybind-list"></div>
+
+      <div class="modal-footer">
+        <button id="btn-reset-keys" class="btn-secondary" type="button">Reset Keys</button>
+        <button id="btn-close-settings" class="btn-primary" type="button">Save &amp; Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTS SCREEN -->
+  <div id="results-screen" class="overlay-screen hidden">
+    <div class="results-card">
+      <div class="badge-pill">EXPEDITION COMPLETE</div>
+      <h1 id="results-winner-title">CAPTAIN WINS!</h1>
+      <p id="results-subtitle" class="subtitle-tagline">Delivered the buried chest to their ship!</p>
+      <div id="results-podium" class="results-podium"></div>
+      <div class="modal-footer" style="justify-content:center; margin-top: 16px;">
+        <button id="btn-play-again" class="btn-primary" type="button">New Expedition</button>
+        <button id="btn-back-lobby" class="btn-secondary" type="button">Back to Harbor</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

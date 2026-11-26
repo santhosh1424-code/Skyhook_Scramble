@@ -1,19 +1,24 @@
 {
-  "name": "skyhook-scramble",
-  "version": "0.1.0",
+  "name": "treasure-isle",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "tsc --noEmit && vite build && tsc -p tsconfig.server.json",
     "preview": "vite preview",
-    "server": "node server/index.js"
+    "server": "tsc -p tsconfig.server.json && node dist-server/server/index.js",
+    "gen:assets": "node scripts/generate-assets.mjs"
   },
   "dependencies": {
     "three": "^0.170.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
+    "@types/node": "^26.6.11",
+    "@types/three": "^0.187.0",
+    "@types/ws": "^8.18.2",
+    "typescript": "^7.0.2",
     "vite": "^6.0.0"
   }
 }

@@ -1,0 +1,218 @@
+{
+  "slots": {
+    "hat": [
+      { "id": "none", "label": "None" },
+      { "id": "hat_tricorn", "label": "Tricorn Hat" },
+      { "id": "hat_bandana", "label": "Corsair Bandana" },
+      { "id": "hat_bicorn", "label": "Admiral Bicorn" },
+      { "id": "hat_explorer", "label": "Explorer Hat" }
+    ],
+    "hair": [
+      { "id": "hair_wavy", "label": "Wavy Locks" },
+      { "id": "hair_short", "label": "Short Cut" },
+      { "id": "hair_braids", "label": "Braided Dreadlocks" }
+    ],
+    "faceItem": [
+      { "id": "none", "label": "None" },
+      { "id": "face_eyepatch", "label": "Eyepatch" },
+      { "id": "face_goggles", "label": "Brass Goggles" },
+      { "id": "face_bandana", "label": "Mask Bandana" }
+    ],
+    "coat": [
+      { "id": "none", "label": "None" },
+      { "id": "coat_captain", "label": "Long Greatcoat" },
+      { "id": "coat_vest", "label": "Tailored Vest" },
+      { "id": "coat_tunic", "label": "Voyager Tunic" }
+    ],
+    "shirt": [
+      { "id": "shirt_linen", "label": "Linen Poet Shirt" },
+      { "id": "shirt_ragged", "label": "Ragged Sleeveless" },
+      { "id": "shirt_striped", "label": "Sailor Striped Shirt" }
+    ],
+    "pants": [
+      { "id": "pants_breeches", "label": "Knee Breeches" },
+      { "id": "pants_trousers", "label": "Deck Trousers" },
+      { "id": "pants_ragged", "label": "Torn Castaway Shorts" }
+    ],
+    "boots": [
+      { "id": "boots_tall", "label": "Tall Sea Boots" },
+      { "id": "boots_ankle", "label": "Ankle Deck Shoes" },
+      { "id": "boots_wraps", "label": "Cloth Foot Wraps" }
+    ],
+    "belt": [
+      { "id": "belt_brass", "label": "Brass Buckle Belt" },
+      { "id": "belt_sash", "label": "Silk Corsair Sash" },
+      { "id": "belt_rope", "label": "Hemp Rope Belt" }
+    ],
+    "gloves": [
+      { "id": "none", "label": "Bare Hands" },
+      { "id": "gloves_leather", "label": "Leather Gloves" },
+      { "id": "gloves_wraps", "label": "Wrist Wraps" },
+      { "id": "gloves_cuffed", "label": "Cuffed Gauntlets" }
+    ],
+    "backItem": [
+      { "id": "none", "label": "None" },
+      { "id": "back_scabbard", "label": "Back Scabbard" },
+      { "id": "back_pack", "label": "Explorer Pack" },
+      { "id": "back_parrot", "label": "Shoulder Parrot" }
+    ],
+    "heldItem": [
+      { "id": "held_cutlass", "label": "Cutlass" },
+      { "id": "held_shovel", "label": "Treasure Shovel" },
+      { "id": "held_pistol", "label": "Flintlock Pistol" },
+      { "id": "held_lantern", "label": "Brass Lantern" },
+      { "id": "held_spyglass", "label": "Spyglass" },
+      { "id": "held_map", "label": "Treasure Map" }
+    ]
+  },
+  "tints": [
+    "#8b2635", "#203a68", "#2d5a3b", "#2a2220", "#ece3d2",
+    "#b58932", "#5c4128", "#6f3c8c", "#2e8b8b", "#a8c7c2"
+  ],
+  "presets": [
+    {
+      "id": "classic_captain",
+      "name": "Classic Pirate Captain",
+      "bodyType": "male_athletic",
+      "slots": {
+        "hat": { "item": "hat_tricorn", "tint": "#2a2220" },
+        "hair": { "item": "hair_wavy", "tint": "#3b2618" },
+        "faceItem": { "item": "face_eyepatch", "tint": "#1e1c1a" },
+        "coat": { "item": "coat_captain", "tint": "#8b2635" },
+        "shirt": { "item": "shirt_linen", "tint": "#ece3d2" },
+        "pants": { "item": "pants_breeches", "tint": "#2a2220" },
+        "boots": { "item": "boots_tall", "tint": "#3b2416" },
+        "belt": { "item": "belt_brass", "tint": "#b58932" },
+        "gloves": { "item": "gloves_cuffed", "tint": "#3b2416" },
+        "backItem": { "item": "back_parrot", "tint": "#2e8b8b" },
+        "heldItem": { "item": "held_cutlass", "tint": "#cfd8e3" }
+      }
+    },
+    {
+      "id": "ragged_castaway",
+      "name": "Ragged Castaway",
+      "bodyType": "slim_scout",
+      "slots": {
+        "hat": { "item": "hat_bandana", "tint": "#8b2635" },
+        "hair": { "item": "hair_braids", "tint": "#2a2220" },
+        "faceItem": { "item": "none", "tint": "#1e1c1a" },
+        "coat": { "item": "none", "tint": "#5c4128" },
+        "shirt": { "item": "shirt_ragged", "tint": "#d9ceb8" },
+        "pants": { "item": "pants_ragged", "tint": "#5c4128" },
+        "boots": { "item": "boots_wraps", "tint": "#c4b69c" },
+        "belt": { "item": "belt_rope", "tint": "#9e8660" },
+        "gloves": { "item": "gloves_wraps", "tint": "#c4b69c" },
+        "backItem": { "item": "none", "tint": "#5c4128" },
+        "heldItem": { "item": "held_shovel", "tint": "#8d6339" }
+      }
+    },
+    {
+      "id": "royal_navy_deserter",
+      "name": "Royal Navy Deserter",
+      "bodyType": "male_athletic",
+      "slots": {
+        "hat": { "item": "hat_bicorn", "tint": "#203a68" },
+        "hair": { "item": "hair_short", "tint": "#5c4128" },
+        "faceItem": { "item": "none", "tint": "#1e1c1a" },
+        "coat": { "item": "coat_captain", "tint": "#203a68" },
+        "shirt": { "item": "shirt_linen", "tint": "#ece3d2" },
+        "pants": { "item": "pants_breeches", "tint": "#ece3d2" },
+        "boots": { "item": "boots_tall", "tint": "#2a2220" },
+        "belt": { "item": "belt_brass", "tint": "#b58932" },
+        "gloves": { "item": "gloves_leather", "tint": "#ece3d2" },
+        "backItem": { "item": "back_scabbard", "tint": "#2a2220" },
+        "heldItem": { "item": "held_pistol", "tint": "#5c4128" }
+      }
+    },
+    {
+      "id": "buccaneer_swashbuckler",
+      "name": "Buccaneer Swashbuckler",
+      "bodyType": "female_athletic",
+      "slots": {
+        "hat": { "item": "hat_bandana", "tint": "#8b2635" },
+        "hair": { "item": "hair_wavy", "tint": "#2a2220" },
+        "faceItem": { "item": "face_bandana", "tint": "#8b2635" },
+        "coat": { "item": "coat_vest", "tint": "#5c4128" },
+        "shirt": { "item": "shirt_striped", "tint": "#ece3d2" },
+        "pants": { "item": "pants_trousers", "tint": "#2a2220" },
+        "boots": { "item": "boots_tall", "tint": "#5c4128" },
+        "belt": { "item": "belt_sash", "tint": "#8b2635" },
+        "gloves": { "item": "gloves_leather", "tint": "#3b2416" },
+        "backItem": { "item": "back_scabbard", "tint": "#5c4128" },
+        "heldItem": { "item": "held_cutlass", "tint": "#cfd8e3" }
+      }
+    },
+    {
+      "id": "treasure_hunter_explorer",
+      "name": "Treasure Hunter Explorer",
+      "bodyType": "female_athletic",
+      "slots": {
+        "hat": { "item": "hat_explorer", "tint": "#5c4128" },
+        "hair": { "item": "hair_braids", "tint": "#5c4128" },
+        "faceItem": { "item": "face_goggles", "tint": "#b58932" },
+        "coat": { "item": "coat_vest", "tint": "#8a6d4b" },
+        "shirt": { "item": "shirt_linen", "tint": "#ece3d2" },
+        "pants": { "item": "pants_trousers", "tint": "#5c4128" },
+        "boots": { "item": "boots_ankle", "tint": "#3b2416" },
+        "belt": { "item": "belt_brass", "tint": "#b58932" },
+        "gloves": { "item": "gloves_leather", "tint": "#5c4128" },
+        "backItem": { "item": "back_pack", "tint": "#6b4c2e" },
+        "heldItem": { "item": "held_spyglass", "tint": "#b58932" }
+      }
+    },
+    {
+      "id": "jungle_scout",
+      "name": "Jungle Scout",
+      "bodyType": "slim_scout",
+      "slots": {
+        "hat": { "item": "none", "tint": "#2d5a3b" },
+        "hair": { "item": "hair_short", "tint": "#2a2220" },
+        "faceItem": { "item": "face_bandana", "tint": "#2d5a3b" },
+        "coat": { "item": "coat_tunic", "tint": "#2d5a3b" },
+        "shirt": { "item": "shirt_ragged", "tint": "#5c4128" },
+        "pants": { "item": "pants_trousers", "tint": "#2d5a3b" },
+        "boots": { "item": "boots_wraps", "tint": "#5c4128" },
+        "belt": { "item": "belt_rope", "tint": "#8a6d4b" },
+        "gloves": { "item": "gloves_wraps", "tint": "#5c4128" },
+        "backItem": { "item": "back_pack", "tint": "#2d5a3b" },
+        "heldItem": { "item": "held_map", "tint": "#e8d6a8" }
+      }
+    },
+    {
+      "id": "voodoo_mystic",
+      "name": "Voodoo Mystic Pirate",
+      "bodyType": "stocky_buccaneer",
+      "slots": {
+        "hat": { "item": "hat_tricorn", "tint": "#6f3c8c" },
+        "hair": { "item": "hair_braids", "tint": "#1e1c1a" },
+        "faceItem": { "item": "face_eyepatch", "tint": "#6f3c8c" },
+        "coat": { "item": "coat_captain", "tint": "#6f3c8c" },
+        "shirt": { "item": "shirt_ragged", "tint": "#2a2220" },
+        "pants": { "item": "pants_trousers", "tint": "#2a2220" },
+        "boots": { "item": "boots_tall", "tint": "#2a2220" },
+        "belt": { "item": "belt_sash", "tint": "#b58932" },
+        "gloves": { "item": "gloves_wraps", "tint": "#6f3c8c" },
+        "backItem": { "item": "back_parrot", "tint": "#6f3c8c" },
+        "heldItem": { "item": "held_lantern", "tint": "#b58932" }
+      }
+    },
+    {
+      "id": "ghost_pirate",
+      "name": "Ghost Pirate",
+      "bodyType": "stocky_buccaneer",
+      "slots": {
+        "hat": { "item": "hat_bicorn", "tint": "#2e8b8b" },
+        "hair": { "item": "hair_wavy", "tint": "#a8c7c2" },
+        "faceItem": { "item": "face_goggles", "tint": "#a8c7c2" },
+        "coat": { "item": "coat_captain", "tint": "#2e8b8b" },
+        "shirt": { "item": "shirt_ragged", "tint": "#a8c7c2" },
+        "pants": { "item": "pants_breeches", "tint": "#2e8b8b" },
+        "boots": { "item": "boots_tall", "tint": "#2e8b8b" },
+        "belt": { "item": "belt_brass", "tint": "#a8c7c2" },
+        "gloves": { "item": "gloves_cuffed", "tint": "#2e8b8b" },
+        "backItem": { "item": "back_scabbard", "tint": "#a8c7c2" },
+        "heldItem": { "item": "held_lantern", "tint": "#a8c7c2" }
+      }
+    }
+  ]
+}
